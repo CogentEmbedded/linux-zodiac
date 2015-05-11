@@ -3087,11 +3087,11 @@ static int dev_match_devt(struct device *dev, const void *data)
 }
 
 /* Must put_device() after it's unused! */
-static struct device *tty_get_device(struct tty_struct *tty)
+struct device *tty_find_device(dev_t devt)
 {
-	dev_t devt = tty_devnum(tty);
 	return class_find_device(tty_class, NULL, &devt, dev_match_devt);
 }
+EXPORT_SYMBOL(tty_find_device);
 
 
 /**
@@ -3133,7 +3133,7 @@ struct tty_struct *alloc_tty_struct(struct tty_driver *driver, int idx)
 	tty->ops = driver->ops;
 	tty->index = idx;
 	tty_line_name(driver, idx, tty->name);
-	tty->dev = tty_get_device(tty);
+	tty->dev = tty_find_device(tty_devnum(tty));
 
 	return tty;
 }
