@@ -437,6 +437,11 @@ extern struct device *tty_register_device_attr(struct tty_driver *driver,
 				unsigned index, struct device *device,
 				void *drvdata,
 				const struct attribute_group **attr_grp);
+extern struct device *tty_device_initialize_attr(struct tty_driver *driver,
+				unsigned index, struct device *device,
+				void *drvdata,
+				const struct attribute_group **attr_grp);
+extern int tty_device_add(struct tty_driver *driver, struct device *dev);
 extern void tty_unregister_device(struct tty_driver *driver, unsigned index);
 extern int tty_read_raw_data(struct tty_struct *tty, unsigned char *bufp,
 			     int buflen);
@@ -534,6 +539,10 @@ extern struct device *tty_port_register_device(struct tty_port *port,
 		struct tty_driver *driver, unsigned index,
 		struct device *device);
 extern struct device *tty_port_register_device_attr(struct tty_port *port,
+		struct tty_driver *driver, unsigned index,
+		struct device *device, void *drvdata,
+		const struct attribute_group **attr_grp);
+extern struct device *tty_port_initialize_device_attr(struct tty_port *port,
 		struct tty_driver *driver, unsigned index,
 		struct device *device, void *drvdata,
 		const struct attribute_group **attr_grp);

@@ -3223,6 +3223,84 @@ static void tty_device_create_release(struct device *dev)
 	kfree(dev);
 }
 
+int tty_device_add(struct tty_driver *driver, struct device *dev)
+{
+	int retval;
+	bool cdev = false;
+	int index = dev->devt - MKDEV(driver->major,
+				      driver->minor_start);
+
+	if (!(driver->flags & TTY_DRIVER_DYNAMIC_ALLOC)) {
+		retval = tty_cdev_add(driver, dev->devt, index, 1);
+		if (retval)
+			return retval;
+		cdev = true;
+	}
+	retval = device_add(dev);
+	if (retval == 0)
+		return 0;
+	if (cdev) {
+		cdev_del(driver->cdevs[index]);
+		driver->cdevs[index] = NULL;
+	}
+	return retval;
+}
+EXPORT_SYMBOL(tty_device_add);
+/**
+ *	tty_device_initialize_attr - initialize a tty device, but don't 'add'
+ *	@driver: the tty driver that describes the tty device
+ *	@index: the index in the tty driver for this tty device
+ *	@device: a struct device that is associated with this tty device.
+ *		This field is optional, if there is no known struct device
+ *		for this tty device it can be set to NULL safely.
+ *	@drvdata: Driver data to be set to device.
+ *	@attr_grp: Attribute group to be set on device.
+ *
+ *	Returns a pointer to the struct device for this tty device
+ *	(or ERR_PTR(-EFOO) on error).
+ *
+ *	tty_device_add() must be called after this call returns successfully
+ *	before the device will be full registered and available.
+ *
+ *	Locking: ??
+ */
+struct device *tty_device_initialize_attr(struct tty_driver *driver,
+					  unsigned index, struct device *device,
+					  void *drvdata,
+					  const struct attribute_group **attr_grp)
+{
+	char name[64];
+	dev_t devt = MKDEV(driver->major, driver->minor_start) + index;
+	struct device *dev = NULL;
+
+	if (index >= driver->num) {
+		printk(KERN_ERR "Attempt to register invalid tty line number "
+		       " (%d).\n", index);
+		return ERR_PTR(-EINVAL);
+	}
+
+	if (driver->type == TTY_DRIVER_TYPE_PTY)
+		pty_line_name(driver, index, name);
+	else
+		tty_line_name(driver, index, name);
+
+	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
+	if (!dev)
+		return ERR_PTR(-ENOMEM);
+
+	device_initialize(dev);
+	dev->devt = devt;
+	dev->class = tty_class;
+	dev->parent = device;
+	dev->release = tty_device_create_release;
+	dev_set_name(dev, "%s", name);
+	dev->groups = attr_grp;
+	dev_set_drvdata(dev, drvdata);
+
+	return dev;
+}
+EXPORT_SYMBOL_GPL(tty_device_initialize_attr);
+
 /**
  *	tty_register_device_attr - register a tty device
  *	@driver: the tty driver that describes the tty device
@@ -3248,57 +3326,19 @@ struct device *tty_register_device_attr(struct tty_driver *driver,
 				   void *drvdata,
 				   const struct attribute_group **attr_grp)
 {
-	char name[64];
-	dev_t devt = MKDEV(driver->major, driver->minor_start) + index;
-	struct device *dev = NULL;
-	int retval = -ENODEV;
-	bool cdev = false;
+	struct device *dev;
+	int ret;
 
-	if (index >= driver->num) {
-		printk(KERN_ERR "Attempt to register invalid tty line number "
-		       " (%d).\n", index);
-		return ERR_PTR(-EINVAL);
+	dev = tty_device_initialize_attr(driver, index, device,
+					 drvdata, attr_grp);
+	if (IS_ERR(dev))
+		return dev;
+	ret = tty_device_add(driver, dev);
+	if (ret) {
+		put_device(dev);
+		return ERR_PTR(ret);
 	}
-
-	if (driver->type == TTY_DRIVER_TYPE_PTY)
-		pty_line_name(driver, index, name);
-	else
-		tty_line_name(driver, index, name);
-
-	if (!(driver->flags & TTY_DRIVER_DYNAMIC_ALLOC)) {
-		retval = tty_cdev_add(driver, devt, index, 1);
-		if (retval)
-			goto error;
-		cdev = true;
-	}
-
-	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
-	if (!dev) {
-		retval = -ENOMEM;
-		goto error;
-	}
-
-	dev->devt = devt;
-	dev->class = tty_class;
-	dev->parent = device;
-	dev->release = tty_device_create_release;
-	dev_set_name(dev, "%s", name);
-	dev->groups = attr_grp;
-	dev_set_drvdata(dev, drvdata);
-
-	retval = device_register(dev);
-	if (retval)
-		goto error;
-
 	return dev;
-
-error:
-	put_device(dev);
-	if (cdev) {
-		cdev_del(driver->cdevs[index]);
-		driver->cdevs[index] = NULL;
-	}
-	return ERR_PTR(retval);
 }
 EXPORT_SYMBOL_GPL(tty_register_device_attr);
 
