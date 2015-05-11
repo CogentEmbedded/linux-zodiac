@@ -96,3 +96,5 @@ obj-$(CONFIG_SERIAL_MPS2_UART)	+= mps2-uart.o
 
 # GPIOLIB helpers for modem control lines
 obj-$(CONFIG_SERIAL_MCTRL_GPIO)	+= serial_mctrl_gpio.o
+
+obj-y += slave/
