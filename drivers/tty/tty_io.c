@@ -95,6 +95,7 @@
 #include <linux/seq_file.h>
 #include <linux/serial.h>
 #include <linux/ratelimit.h>
+#include <linux/uart_slave.h>
 
 #include <linux/uaccess.h>
 
@@ -1529,6 +1530,8 @@ struct tty_struct *tty_init_dev(struct tty_driver *driver, int idx)
 	retval = tty_driver_install_tty(driver, tty);
 	if (retval < 0)
 		goto err_deinit_tty;
+
+	uart_slave_activate(tty);
 
 	if (!tty->port)
 		tty->port = driver->ports[idx];

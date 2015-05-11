@@ -1634,4 +1634,5 @@ endmenu
 config SERIAL_MCTRL_GPIO
 	tristate
 
+source drivers/tty/serial/slave/Kconfig
 endif # TTY

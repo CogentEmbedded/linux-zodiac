@@ -34,6 +34,7 @@
 #include <linux/serial_core.h>
 #include <linux/delay.h>
 #include <linux/mutex.h>
+#include <linux/uart_slave.h>
 
 #include <asm/irq.h>
 #include <asm/uaccess.h>
@@ -2717,10 +2718,16 @@ int uart_add_one_port(struct uart_driver *drv, struct uart_port *uport)
 	 * Register the port whether it's detected or not.  This allows
 	 * setserial to be used to alter this port's parameters.
 	 */
-	tty_dev = tty_port_register_device_attr(port, drv->tty_driver,
+	tty_dev = tty_port_initialize_device_attr(port, drv->tty_driver,
 			uport->line, uport->dev, port, uport->tty_groups);
 	if (likely(!IS_ERR(tty_dev))) {
 		device_set_wakeup_capable(tty_dev, 1);
+		if (uart_slave_register(uport->dev, tty_dev,
+					drv->tty_driver) < 0) {
+			ret = tty_device_add(drv->tty_driver, tty_dev);
+			if (ret)
+				put_device(tty_dev);
+		}
 	} else {
 		dev_err(uport->dev, "Cannot register tty device on line %d\n",
 		       uport->line);
