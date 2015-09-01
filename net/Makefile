@@ -28,6 +28,7 @@ obj-$(CONFIG_X25)		+= x25/
 obj-$(CONFIG_LAPB)		+= lapb/
 obj-$(CONFIG_NETROM)		+= netrom/
 obj-$(CONFIG_ROSE)		+= rose/
+obj-$(CONFIG_ARINC429)		+= arinc429/
 obj-$(CONFIG_AX25)		+= ax25/
 obj-$(CONFIG_CAN)		+= can/
 obj-$(CONFIG_IRDA)		+= irda/
