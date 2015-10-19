@@ -231,6 +231,9 @@ static void of_gpiochip_scan_hogs(struct gpio_chip *chip)
 
 			if (gpiod_hog(desc, name, lflags, dflags))
 				continue;
+
+			if (of_property_read_bool(np, "export"))
+				set_bit(FLAG_HOG_EXPORT, &desc->flags);
 		}
 	}
 }
