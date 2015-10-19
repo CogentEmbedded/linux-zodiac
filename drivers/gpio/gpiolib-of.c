@@ -206,32 +206,24 @@ static void of_gpiochip_scan_gpios(struct gpio_chip *chip)
 	enum gpiod_flags dflags;
 
 	for_each_child_of_node(chip->of_node, np) {
-		struct gpio_desc *name_desc;
+		if (!of_property_read_bool(np, "gpio-hog"))
+			continue;
 
 		desc = of_parse_own_gpio(np, &name, &lflags, &dflags);
 		if (IS_ERR(desc))
 			continue;
 
-		name_desc = gpio_name_to_desc(name);
-		if (name_desc)
-			dev_warn(chip->dev, "GPIO name collision for '%s' detected at GPIO line %d (%s)\n",
-				 name, desc_to_gpio(desc), np->name);
-		else if (desc->name)
-			dev_warn(chip->dev, "GPIO has already a name '%s' new name would be '%s' at GPIO %d\n",
-				 desc->name, name, desc_to_gpio(desc));
-		else
-			desc->name = name;
-
-		if (of_property_read_bool(np, "gpio-hog")) {
-			if (!dflags) {
-				pr_warn("GPIO line %d (%s): no hogging state specified, bailing out\n",
-					desc_to_gpio(desc), np->name);
-				continue;
-			}
-
-			if (gpiod_hog(desc, name, lflags, dflags))
-				continue;
+		if (!dflags) {
+			pr_warn("GPIO line %d (%s): no hogging state specified, bailing out\n",
+				desc_to_gpio(desc), np->name);
+			continue;
 		}
+
+		if (gpiod_hog(desc, name, lflags, dflags))
+			continue;
+
+		if (of_property_read_bool(np, "export"))
+			set_bit(FLAG_HOG_EXPORT, &desc->flags);
 	}
 }
 

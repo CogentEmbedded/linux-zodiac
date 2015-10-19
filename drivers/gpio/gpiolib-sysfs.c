@@ -732,9 +732,12 @@ EXPORT_SYMBOL_GPL(gpiod_unexport);
 
 int gpiochip_sysfs_register(struct gpio_device *gdev)
 {
+	int i;
+	int ret;
 	struct device	*dev;
 	struct device	*parent;
 	struct gpio_chip *chip = gdev->chip;
+	struct gpio_desc *desc;
 
 	/*
 	 * Many systems add gpio chips for SOC support very early,
@@ -765,6 +768,17 @@ int gpiochip_sysfs_register(struct gpio_device *gdev)
 	mutex_lock(&sysfs_lock);
 	gdev->mockdev = dev;
 	mutex_unlock(&sysfs_lock);
+
+	for (i = 0; i < chip->ngpio; i++) {
+		desc = &chip->desc[i];
+		if (test_and_clear_bit(FLAG_HOG_EXPORT, &desc->flags)) {
+			ret = gpiod_export(desc, false);
+			if (ret)
+				gpiod_dbg(desc, "%s: failed to autoexport"
+					  " hogged gpio: %d\n",
+					  __func__, ret);
+		}
+	}
 
 	return 0;
 }
