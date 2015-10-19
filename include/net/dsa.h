@@ -64,6 +64,11 @@ struct dsa_chip_data {
 	 * NULL if there is only one switch chip.
 	 */
 	s8		*rtable;
+
+	/*
+	 * Reset gpio
+	 */
+	int gpio_reset;
 };
 
 struct dsa_platform_data {

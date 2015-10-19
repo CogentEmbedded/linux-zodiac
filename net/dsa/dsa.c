@@ -21,6 +21,7 @@
 #include <linux/of_mdio.h>
 #include <linux/of_platform.h>
 #include <linux/of_net.h>
+#include <linux/of_gpio.h>
 #include <linux/sysfs.h>
 #include <linux/phy_fixed.h>
 #include "dsa_priv.h"
@@ -381,6 +382,25 @@ dsa_switch_setup(struct dsa_switch_tree *dst, int index,
 	struct dsa_switch *ds;
 	int ret;
 	char *name;
+	enum of_gpio_flags flags;
+
+	pd->gpio_reset = of_get_named_gpio_flags(pd->of_node, "reset-gpios", 0, &flags);
+	if (gpio_is_valid(pd->gpio_reset)) {
+		ret = devm_gpio_request_one(host_dev, pd->gpio_reset,
+					    flags, "switch_reset");
+		if (ret) {
+			dev_err(host_dev, "failed to request reset gpio %d: %d\n",
+				pd->gpio_reset, ret);
+			return ERR_PTR(-ENODEV);
+		}
+
+		/* set active state */
+		gpio_set_value(pd->gpio_reset, 1);
+		usleep_range(10000, 20000);
+		/* set inactive state */
+		gpio_set_value(pd->gpio_reset, 0);
+		usleep_range(10000, 20000);
+	}
 
 	/*
 	 * Probe for switch model.
