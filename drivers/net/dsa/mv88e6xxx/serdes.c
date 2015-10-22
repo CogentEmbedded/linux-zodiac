@@ -21,7 +21,7 @@
 #define MV88E6352_ADDR_SERDES		0x0f
 #define MV88E6352_SERDES_PAGE_FIBER	0x01
 
-static int mv88e6352_serdes_read(struct mv88e6xxx_chip *chip, int reg,
+int mv88e6352_serdes_read(struct mv88e6xxx_chip *chip, int reg,
 				 u16 *val)
 {
 	return mv88e6xxx_phy_page_read(chip, MV88E6352_ADDR_SERDES,
@@ -29,7 +29,7 @@ static int mv88e6352_serdes_read(struct mv88e6xxx_chip *chip, int reg,
 				       reg, val);
 }
 
-static int mv88e6352_serdes_write(struct mv88e6xxx_chip *chip, int reg,
+int mv88e6352_serdes_write(struct mv88e6xxx_chip *chip, int reg,
 				  u16 val)
 {
 	return mv88e6xxx_phy_page_write(chip, MV88E6352_ADDR_SERDES,

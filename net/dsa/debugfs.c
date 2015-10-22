@@ -360,6 +360,9 @@ static int dsa_debugfs_create_symlink_link(struct dsa_switch *ds,
 		else
 			netdev = ds->ports[port].netdev;
 
+		if (!netdev)
+			return -EINVAL;
+
 		snprintf(target, sizeof(target), "/sys/class/net/%s",
 			 netdev_name(netdev));
 	}

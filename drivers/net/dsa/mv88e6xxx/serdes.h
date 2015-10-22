@@ -42,4 +42,9 @@
 int mv88e6352_serdes_power(struct mv88e6xxx_chip *chip, int port, bool on);
 int mv88e6390_serdes_power(struct mv88e6xxx_chip *chip, int port, bool on);
 
+int mv88e6352_serdes_read(struct mv88e6xxx_chip *chip, int reg,
+				 u16 *val);
+int mv88e6352_serdes_write(struct mv88e6xxx_chip *chip, int reg,
+				  u16 val);
+
 #endif

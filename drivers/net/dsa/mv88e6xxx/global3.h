@@ -12,8 +12,6 @@
 #ifndef _MV88E6XXX_GLOBAL3_H
 #define _MV88E6XXX_GLOBAL3_H
 
-#include "chip.h"
-
 #define MV88E6XXX_TCAM_PARAM_DISABLED	INT_MIN
 
 struct mv88e6xxx_tcam_data {
