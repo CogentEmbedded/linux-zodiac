@@ -336,6 +336,26 @@
 	};
 };
 
+&dspi2 {
+	status = "okay";
+
+	hi3593@0 {
+		compatible = "holtic,hi3593";
+		pinctrl-0 = <&pinctrl_gpio_hi3593>;
+		pinctrl-names = "default";
+		reg = <0>;
+		spi-max-frequency = <5000000>;
+
+		master_reset-gpio = <&gpio5 2 GPIO_ACTIVE_HIGH>;
+		r1_int-gpio = <&gpio3 13 GPIO_ACTIVE_HIGH>;
+		r1_flag-gpio = <&gpio3 15 GPIO_ACTIVE_HIGH>;
+		r2_int-gpio = <&gpio3 14 GPIO_ACTIVE_HIGH>;
+		r2_flag-gpio = <&gpio3 1 GPIO_ACTIVE_HIGH>;
+		tx_full-gpio = <&gpio3 12 GPIO_ACTIVE_HIGH>;
+		tx_empty-gpio = <&gpio3 11 GPIO_ACTIVE_HIGH>;
+	};
+};
+
 &adc0 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_adc0_ad5>;
@@ -633,6 +653,17 @@
 			VF610_PAD_PTB20__GPIO_42	0x33e1
 			VF610_PAD_PTB19__GPIO_41	0x33e2
 			VF610_PAD_PTB18__GPIO_40	0x33e2
+		>;
+	};
+
+	pinctrl_gpio_hi3593: pinctrl-gpio-hi3593 {
+		fsl,pins = <
+			VF610_PAD_PTB27__GPIO_97		0x33e1
+			VF610_PAD_PTE2__GPIO_107		0x33e1
+			VF610_PAD_PTE3__GPIO_108		0x33e1
+			VF610_PAD_PTE4__GPIO_109		0x33e1
+			VF610_PAD_PTE5__GPIO_110		0x33e1
+			VF610_PAD_PTE6__GPIO_111		0x33e1
 		>;
 	};
 
