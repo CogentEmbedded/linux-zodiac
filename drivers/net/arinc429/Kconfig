@@ -22,9 +22,16 @@ if ARINC429_DEV
 config ARINC429_HOLTIC_HI3585
 	tristate "HoltIC HI-3585 ARINC429 controller"
 	---help---
-	  This is a driver for the ARINC429 controller in produced by HoltIC.
+	  This is a driver for the HI-3585 ARINC429 controller produced by HoltIC.
+
+config ARINC429_HOLTIC_HI3593
+	tristate "HoltIC HI-3593 ARINC429 controller"
+	depends on SPI_MASTER
+	---help---
+	  This is a driver for the HI-3593 ARINC429 controller produced by HoltIC.
 
 endif
+
 
 config ARINC429_DEBUG_DEVICES
 	bool "ARINC429 devices debugging messages"
