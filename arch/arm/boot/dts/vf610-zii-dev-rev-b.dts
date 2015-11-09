@@ -346,6 +346,23 @@
 		reg = <0>;
 		spi-max-frequency = <5000000>;
 
+		/* fine tune initial channel settings, see datasheet for register settings: */
+		/* flip label bits, no parity */
+		r1_ctrl = /bits/ 8 <0x88>;
+		r2_ctrl = /bits/ 8 <0x88>;
+		/* flip label bits, send as soon as message is written to FIFO, parity enabled, odd */
+		tx_ctrl = /bits/ 8 <0x64>;
+		/* flag and interrupt assignment register:
+		 * NOTE: do not leave default 0 if rX_flag interrupt is used, chip will keep it high all the time
+		 * - RxINT triggers when any valid message received
+		 * - RxFLAG IRQ triggers when FIFO half full */
+		flag_iar = /bits/ 8 <0x22>;
+
+		/* receiver label filters as bitmaps. e.g:
+		 * r1_lf = "241,255";
+		 * r2_lf = "32-34,255";
+		*/
+
 		master_reset-gpio = <&gpio5 2 GPIO_ACTIVE_HIGH>;
 		r1_int-gpio = <&gpio3 13 GPIO_ACTIVE_HIGH>;
 		r1_flag-gpio = <&gpio3 15 GPIO_ACTIVE_HIGH>;
