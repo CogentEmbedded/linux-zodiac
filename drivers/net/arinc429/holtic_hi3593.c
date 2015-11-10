@@ -160,6 +160,10 @@ P-L filter #3, the second to P-L filter #2, and the last byte to filter #1	*/
 #define R2_INT_PL2_MSG_RECEIVED	(2 << 6)
 #define R2_INT_PL3_MSG_RECEIVED	(3 << 6)
 
+#define DEFAULT_FLAG_IAR_VALUE	(R1_FLAG_FIFO_HALF_FULL | R2_FLAG_FIFO_HALF_FULL)
+
+#define DEFAULT_CR_VALUE	(0)
+
 /* Receiver control register bits */
 #define RECEIVER_FLIP			(1 << 7)
 #define RECEIVER_SD9			(1 << 6)
@@ -853,8 +857,7 @@ __hi3593_configure_label_filters(struct hi3593_priv *adev,
 }
 
 static int __hi3593_hw_default_config(struct hi3593_priv *adev) {
-	u8 tx_buf[2] = {CMD_WRITE_FLAG, adev->flag_iar};
-	enum channel_type ch;
+	u8 tx_buf[2] = {CMD_WRITE_FLAG, DEFAULT_FLAG_IAR_VALUE};
 	int ret;
 
 	ret = hi3593_master_reset(adev);
@@ -866,31 +869,21 @@ static int __hi3593_hw_default_config(struct hi3593_priv *adev) {
 	if (ret)
 		return ret;
 
-	/* setup label filters if any */
-	if (!bitmap_empty(adev->r1_label_filter, NUM_LABELS)) {
-		ret = __hi3593_configure_label_filters(adev,
-				RECEIVER_1, adev->r1_label_filter);
-		if (ret)
-			return ret;
-		adev->ctrl_regs[RECEIVER_1] |= RECEIVER_LABEL_FILTERS_ENABLED;
-	}
-	if (!bitmap_empty(adev->r2_label_filter, NUM_LABELS)) {
-		ret = __hi3593_configure_label_filters(adev,
-				RECEIVER_2, adev->r2_label_filter);
-		if (ret)
-			return ret;
-		adev->ctrl_regs[RECEIVER_2] |= RECEIVER_LABEL_FILTERS_ENABLED;
-	}
+	return ret;
+}
 
-	/* write control regs if values provided via device tree */
-	for (ch = FIRST_CHANNEL; ch < NUM_CHANNELS; ch++) {
-		if (adev->ctrl_regs[ch]) {
-			ret = __hi3593_write_ctrl_reg(adev,
-				ch, adev->ctrl_regs[ch]);
-			if (ret)
-				return ret;
-		}
-	}
+static int __hi3593_channel_default_config(struct hi3593_channel_priv *chan) {
+	u8 tx_buf[2] = {write_cr_cmds[chan->type], DEFAULT_CR_VALUE};
+	int ret;
+
+	/* as master and soft reset are performed for a whole chip state, it is
+	 * needed to bring receiver or transmitter to default state, i.e. set
+	 * default value in control register. Do not bother to clean label filters
+	 * bitmap or priority matching labels on receivers, as they are used only if
+	 * corresponding bit is enabled in control reg */
+	ret = spi_write(chan->adev->spi, tx_buf, sizeof(tx_buf));
+	if (ret)
+		return ret;
 
 	return ret;
 }
@@ -1052,8 +1045,6 @@ static int hi3593_open(struct net_device *ndev)
 		break;
 	}
 
-	__hi3593_update_channel_rate(chan);
-
 	adev->active_channels++;
 
 	mutex_unlock(&adev->dev_lock);
@@ -1125,6 +1116,9 @@ static int hi3593_close(struct net_device *ndev)
 		BUG();
 		break;
 	}
+
+	/* put channel into default state */
+	__hi3593_channel_default_config(chan);
 
 	adev->active_channels--;
 
@@ -1529,12 +1523,6 @@ static void hi3593_free_channel(struct hi3593_channel_priv *chan)
 /* Parses Device Tree data for the chip.
  * Supported properties:
  *   arinc-frequency - ARINC429 clock frequency, (1,2,4,6..30 MHz)
- *   r1_ctrl - initial value for Receiver 1 control register
- *   r2_ctrl - initial value for Receiver 2 control register
- *   tx_ctrl - initial value for Transmitter control register
- *   flag_iar - initial value for FLAG / Interrupt Assignment register
- *   r1_lf - label filters bitmap list for Receiver 1
- *   r2_lf - label filters bitmap list for Receiver 2
  *   master_reset-gpio - external HW reset pin
  *   r1_int-gpio - Receiver 1 interrupt (R1INT)
  *   r1_flag-gpio - Receiver 1 FLAG interrupt (R1FLAG)
@@ -1543,27 +1531,11 @@ static void hi3593_free_channel(struct hi3593_channel_priv *chan)
  *   tx_full-gpio - Transmitter FIFO full interrupt (TFULL)
  *   tx_empty-gpio - Transmitter FIFO empty (TFEMPTY)
  *
- * Sample configuration:
- * arinc-frequency = <1000000>;
- * r1_ctrl = /bits/ 8 <0x88>;
- * r2_ctrl = /bits/ 8 <0x88>;
- * tx_ctrl = /bits/ 8 <0x60>;
- * flag_iar = /bits/ 8 <0x22>;
- * r1_lf = "241,255";
- * master_reset-gpio = <&gpio3 12 GPIO_ACTIVE_HIGH>;
- * r1_int-gpio = <&gpio3 3 GPIO_ACTIVE_HIGH>;
- * r1_flag-gpio = <&gpio3 7 GPIO_ACTIVE_HIGH>;
- * r2_int-gpio = <&gpio3 4 GPIO_ACTIVE_HIGH>;
- * r2_flag-gpio = <&gpio3 8 GPIO_ACTIVE_HIGH>;
- * tx_full-gpio = <&gpio4 1 GPIO_ACTIVE_HIGH>;
- * tx_empty-gpio = <&gpio4 0 GPIO_ACTIVE_HIGH>;
  */
 static int hi3593_probe_dt(struct hi3593_priv *adev)
 {
 	struct device *dev = &adev->spi->dev;
 	struct device_node *node = dev->of_node;
-	const char* s;
-	u8 val;
 	int ret;
 
 	if (!node) {
@@ -1583,52 +1555,6 @@ static int hi3593_probe_dt(struct hi3593_priv *adev)
 		}
 	}
 	dev_dbg(dev, "selected ARINC429 clock frequency: %u\n", adev->freq);
-
-	/* read pre-defined control register values */
-	ret = of_property_read_u8(node, "r1_ctrl", &val);
-	if (!ret) {
-		adev->ctrl_regs[RECEIVER_1] = val;
-		dev_dbg(dev, "set Receiver1 Control Reg to %#x\n", val);
-	}
-	ret = of_property_read_u8(node, "r2_ctrl", &val);
-	if (!ret) {
-		adev->ctrl_regs[RECEIVER_2] = val;
-		dev_dbg(dev, "set Receiver2 Control Reg to %#x\n", val);
-
-	}
-	ret = of_property_read_u8(node, "tx_ctrl", &val);
-	if (!ret) {
-		adev->ctrl_regs[TRANSMITTER] = val;
-		dev_dbg(dev, "set Transmitter Control Reg to %#x\n", val);
-	}
-	ret = of_property_read_u8(node, "flag_iar", &val);
-	if (!ret) {
-		adev->flag_iar = val;
-		dev_dbg(dev, "set FLAG/IAR to %#x\n", val);
-	}
-
-	ret = of_property_read_string(node, "r1_lf", &s);
-	if (!ret) {
-		ret = bitmap_parselist(s, adev->r1_label_filter, NUM_LABELS);
-		if (ret) {
-			dev_err(dev,
-				"error parsing label filters from list: %s\n", s);
-			bitmap_zero(adev->r1_label_filter, NUM_LABELS);
-		} else
-			dev_dbg(dev, "label filter: %*pbl\n",
-				NUM_LABELS, adev->r1_label_filter);
-	}
-	ret = of_property_read_string(node, "r2_lf", &s);
-	if (!ret) {
-		ret = bitmap_parselist(s, adev->r2_label_filter, NUM_LABELS);
-		if (ret) {
-			dev_err(dev,
-				"error parsing label filters from list: %s\n", s);
-			bitmap_zero(adev->r2_label_filter, NUM_LABELS);
-		} else
-			dev_dbg(dev, "label filter: %*pbl\n",
-				NUM_LABELS, adev->r2_label_filter);
-	}
 
 	adev->hw_reset = of_get_named_gpio(node, "master_reset-gpio", 0);
 	if (gpio_is_valid(adev->hw_reset))
