@@ -312,6 +312,155 @@ struct hi3593_priv {
 	struct sk_buff_head		txq;
 };
 
+#ifdef CONFIG_DEBUG_FS
+#include <linux/debugfs.h>
+
+static struct dentry *debugfs_rootdir = NULL;
+static int num_devices = 0;
+static DEFINE_MUTEX(debug_lock);
+
+static struct {
+	char const* name;
+	u8 reg;
+	u8 data_size;
+} read_regs[] = {
+	{"TX SR",	CMD_READ_TSR,		1},
+	{"TX CR",	CMD_READ_TCR,		1},
+	{"RX1 SR",	CMD_READ_R1_STATUS,	1},
+	{"RX1 CR",	CMD_READ_R1_CTRL,	1},
+	{"RX1 labels",	CMD_READ_R1_LABELS,	32},
+	{"RX1 PLMR",	CMD_READ_R1_PLMR,	3},
+	{"RX1 MSG",	CMD_READ_R1_MSG,	4},
+	{"RX1 PLR1",	CMD_READ_R1_PLR1,	3},
+	{"RX1 PLR2",	CMD_READ_R1_PLR2,	3},
+	{"RX1 PLR3",	CMD_READ_R1_PLR3,	3},
+	{"RX2 SR",	CMD_READ_R2_STATUS,	1},
+	{"RX2 CR",	CMD_READ_R2_CTRL,	1},
+	{"RX2 labels",	CMD_READ_R2_LABELS,	32},
+	{"RX2 PLMR",	CMD_READ_R2_PLMR,	3},
+	{"RX2 MSG",	CMD_READ_R2_MSG,	4},
+	{"RX2 PLR1",	CMD_READ_R2_PLR1,	3},
+	{"RX2 PLR2",	CMD_READ_R2_PLR2,	3},
+	{"RX2 PLR3",	CMD_READ_R2_PLR3,	3},
+	{"FLAG/IAR",	CMD_READ_FLAG,		1},
+	{"ACLK DIV", 	CMD_READ_ACLK_DIV,	1}
+};
+
+#define READ_REGS_COUNT (sizeof(read_regs) / sizeof(read_regs[0]))
+
+static inline void hi3593_reverse_bytes(u8 *dst,
+		const u8 *src, unsigned int n);
+
+static int hi3593_regs_dump(struct seq_file *s, void *data)
+{
+	struct hi3593_priv *adev = s->private;
+	DECLARE_BITMAP(reversed, NUM_LABELS);
+	u8 rx_buf[32];
+	int ret;
+	int i;
+
+	mutex_lock(&adev->dev_lock);
+
+	for (i = 0; i < READ_REGS_COUNT; i++) {
+		ret = spi_write_then_read(adev->spi,
+			&read_regs[i].reg, 1,
+			rx_buf, read_regs[i].data_size);
+
+		if (ret)
+			goto exit;
+		switch(read_regs[i].data_size) {
+		case 1:
+			seq_printf(s,"%s : 0x%02X\n",
+					read_regs[i].name, rx_buf[0]);
+			break;
+		case 3:
+			seq_printf(s,"%s : 0x%02X 0x%02X 0x%02X\n",
+					read_regs[i].name, rx_buf[0],
+					rx_buf[1], rx_buf[2]);
+			break;
+		case 4:
+			seq_printf(s,"%s : 0x%02X 0x%02X 0x%02X 0x%02X\n",
+					read_regs[i].name, rx_buf[0],
+					rx_buf[1], rx_buf[2], rx_buf[3]);
+			break;
+
+		case 32:
+			hi3593_reverse_bytes((u8*)reversed,
+				(const u8*)rx_buf, NUM_LABELS / BITS_PER_BYTE);
+			seq_printf(s,"%s : %*pb\nas list: {%*pbl}\n",
+				read_regs[i].name, NUM_LABELS, reversed,
+				NUM_LABELS, reversed);
+			break;
+
+		default:
+			break;
+		}
+	}
+exit:
+	mutex_unlock(&adev->dev_lock);
+
+	return ret;
+}
+
+static int hi3593_regs_dump_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, hi3593_regs_dump, inode->i_private);
+}
+
+static const struct file_operations hi3593_debugfs_fops = {
+	.open		= hi3593_regs_dump_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+
+static void hi3593_register_debugfs(struct hi3593_priv *adev)
+{
+	struct dentry *dev_dir;
+	struct dentry *regs_file;
+	char dev_name[4];
+
+	mutex_lock(&debug_lock);
+
+	if (!debugfs_rootdir) {
+		debugfs_rootdir = debugfs_create_dir(DRV_NAME, NULL);
+		if (!debugfs_rootdir)
+			goto unlock;
+	}
+
+	snprintf(dev_name, sizeof(dev_name), "%u", num_devices);
+	num_devices++;
+
+	dev_dir = debugfs_create_dir(dev_name, debugfs_rootdir);
+	if (!dev_dir) {
+		dev_dbg(&adev->spi->dev, "unable to create dir: %s\n", dev_name);
+		goto unlock;
+	}
+
+	regs_file = debugfs_create_file("regs", S_IRUGO, dev_dir,
+				adev, &hi3593_debugfs_fops);
+
+unlock:
+	mutex_unlock(&debug_lock);
+}
+
+static void hi3593_unregister_debugfs(struct hi3593_priv *adev)
+{
+	mutex_lock(&debug_lock);
+	num_devices--;
+	if (!num_devices) {
+		debugfs_remove_recursive(debugfs_rootdir);
+		debugfs_rootdir = NULL;
+	}
+
+	mutex_unlock(&debug_lock);
+}
+
+#else
+static inline void hi3593_register_debugfs(struct hi3593_priv *adev) {}
+static inline void hi3593_unregister_debugfs(struct hi3593_priv *adev) {}
+#endif
+
 static void __hi3593_rx_buf_until_empty(struct hi3593_channel_priv *chan);
 
 static inline bool hi3593_is_transmitter(enum channel_type channel_type)
@@ -1298,80 +1447,6 @@ static DEVICE_ATTR(tx_odd_even, S_IRUGO | S_IWUSR,
 	hi3593_tx_odd_even_get, hi3593_tx_odd_even_set);
 
 static ssize_t
-hi3593_dump_regs_get(struct device *d,
-		struct device_attribute *attr, char *buf)
-{
-	struct net_device *dev = to_net_dev(d);
-	struct hi3593_channel_priv *chan = netdev_priv(dev);
-	struct hi3593_priv *adev = chan->adev;
-	struct {
-		char *name;
-		u8 reg;
-		u8 val;
-	} reg_data[] = {
-		{"R1 CTRL", CMD_READ_R1_CTRL, 0},
-		{"R2 CTRL", CMD_READ_R2_CTRL, 0},
-		{"FLAG", CMD_READ_FLAG, 0},
-		{"TX CTRL", CMD_READ_TCR, 0},
-		{"ACLK DIV", CMD_READ_ACLK_DIV, 0},
-	};
-	DECLARE_BITMAP(bits, NUM_LABELS);
-	DECLARE_BITMAP(reversed, NUM_LABELS);
-	u8 cmd = CMD_READ_R1_LABELS;
-	ssize_t count = 0;
-	int i;
-	int ret;
-
-	for (i = 0; i < 5; i++) {
-		ret = spi_write_then_read(adev->spi,
-			&reg_data[i].reg, 1,
-			&reg_data[i].val, 1);
-
-		if (ret)
-			continue;
-
-		ret = sprintf(buf, "%s : %#x\n",
-				reg_data[i].name, reg_data[i].val);
-		buf += ret;
-		count += ret;
-	}
-
-	if (!spi_write_then_read(adev->spi, &cmd, 1, (u8*)bits, 32)) {
-		ret = sprintf(buf, "R1 LABELS:\n");
-		buf += ret;
-		count += ret;
-		hi3593_reverse_bytes((u8*)reversed,
-			(const u8*)bits, NUM_LABELS / BITS_PER_BYTE);
-		ret = bitmap_print_to_pagebuf(false, buf, reversed, NUM_LABELS);
-		buf += ret;
-		count += ret;
-		ret = sprintf(buf, "\n");
-		buf += ret;
-		count += ret;
-	}
-
-	cmd = CMD_READ_R2_LABELS;
-	if (!spi_write_then_read(adev->spi, &cmd, 1, (u8*)bits, 32)) {
-		ret = sprintf(buf, "R2 LABELS:\n");
-		buf += ret;
-		count += ret;
-		hi3593_reverse_bytes((u8*)reversed,
-			(const u8*)bits, NUM_LABELS / BITS_PER_BYTE);
-		ret = bitmap_print_to_pagebuf(false, buf, reversed, NUM_LABELS);
-		buf += ret;
-		count += ret;
-		ret = sprintf(buf, "\n");
-		buf += ret;
-		count += ret;
-	}
-
-	return count;
-}
-
-static DEVICE_ATTR(dump_regs, S_IRUSR,
-	hi3593_dump_regs_get, NULL);
-
-static ssize_t
 hi3593_channel_type_get(struct device *d,
 		struct device_attribute *attr, char *buf)
 {
@@ -1390,7 +1465,6 @@ static struct attribute *hi3593_sysfs_entries[] = {
 	&dev_attr_label_filter.attr,
 	&dev_attr_label_filter_bitmap.attr,
 	&dev_attr_tx_odd_even.attr,
-	&dev_attr_dump_regs.attr,
 	&dev_attr_channel_type.attr,
 	NULL
 };
@@ -1750,6 +1824,8 @@ static int hi3593_spi_probe(struct spi_device *spi)
 
 	skb_queue_head_init(&adev->txq);
 
+	hi3593_register_debugfs(adev);
+
 	return 0;
 
 cleanup:
@@ -1768,6 +1844,8 @@ static int hi3593_spi_remove(struct spi_device *spi)
 
 	for (ch = FIRST_CHANNEL; ch < NUM_CHANNELS; ch++)
 		hi3593_free_channel(adev->channels[ch]);
+
+	hi3593_unregister_debugfs(adev);
 
 	return 0;
 }
