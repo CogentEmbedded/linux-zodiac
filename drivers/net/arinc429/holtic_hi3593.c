@@ -644,16 +644,8 @@ static void
 hi3593_enable_timer(unsigned long arg)
 {
 	struct hi3593_channel_priv *chan = (struct hi3593_channel_priv *)arg;
-	int irq;
 
 	netdev_vdbg(chan->ndev, "%s: enter\n", __func__);
-
-	if (chan->type == RECEIVER_1)
-		irq = gpio_to_irq(chan->adev->r1_int);
-	else if (chan->type == RECEIVER_2)
-		irq = gpio_to_irq(chan->adev->r2_int);
-	else
-		BUG();
 
 	schedule_work(&chan->work);
 }
