@@ -162,8 +162,6 @@ P-L filter #3, the second to P-L filter #2, and the last byte to filter #1	*/
 
 #define DEFAULT_FLAG_IAR_VALUE	(R1_FLAG_FIFO_HALF_FULL | R2_FLAG_FIFO_HALF_FULL)
 
-#define DEFAULT_CR_VALUE	(0)
-
 /* Receiver control register bits */
 #define RECEIVER_FLIP			(1 << 7)
 #define RECEIVER_SD9			(1 << 6)
@@ -173,6 +171,10 @@ P-L filter #3, the second to P-L filter #2, and the last byte to filter #1	*/
 #define RECEIVER_LABEL_FILTERS_ENABLED	(1 << 2)
 #define RECEIVER_PRIORITY_MATCH_ON	(1 << 1)
 #define RECEIVER_RATE			(1 << 0)
+
+/* ARINC429 simulator sends data with flipped bits and parity enabled,
+ * use these settings as default */
+#define DEFAULT_RX_CR_VALUE	(RECEIVER_FLIP | RECEIVER_PARITY)
 
 /* Receiver status register bits */
 #define RECEIVER_STATUS_PL3		(1 << 5)
@@ -190,6 +192,9 @@ P-L filter #3, the second to P-L filter #2, and the last byte to filter #1	*/
 #define TRANSMITTER_ODD_EVEN		(1 << 3)
 #define TRANSMITTER_PARITY		(1 << 2)
 #define TRANSMITTER_RATE		(1 << 0)
+
+/* flip label bits, send immediately after TX FIFO write and use odd parity */
+#define DEFAULT_TX_CR_VALUE	(TRANSMITTER_FLIP | TRANSMITTER_MODE | TRANSMITTER_PARITY)
 
 /* Transmitter status bits */
 #define TRANSMITTER_STATUS_FULL		(1 << 2)
@@ -873,19 +878,16 @@ static int __hi3593_hw_default_config(struct hi3593_priv *adev) {
 }
 
 static int __hi3593_channel_default_config(struct hi3593_channel_priv *chan) {
-	u8 tx_buf[2] = {write_cr_cmds[chan->type], DEFAULT_CR_VALUE};
-	int ret;
+	u8 val;
 
 	/* as master and soft reset are performed for a whole chip state, it is
 	 * needed to bring receiver or transmitter to default state, i.e. set
 	 * default value in control register. Do not bother to clean label filters
 	 * bitmap or priority matching labels on receivers, as they are used only if
 	 * corresponding bit is enabled in control reg */
-	ret = spi_write(chan->adev->spi, tx_buf, sizeof(tx_buf));
-	if (ret)
-		return ret;
 
-	return ret;
+	val = hi3593_is_transmitter(chan->type) ? DEFAULT_TX_CR_VALUE : DEFAULT_RX_CR_VALUE;
+	return __hi3593_write_ctrl_reg(chan->adev, chan->type, val);
 }
 
 static inline void __hi3593_update_channel_rate(
@@ -919,6 +921,8 @@ static int hi3593_open(struct net_device *ndev)
 		if (ret)
 			goto err_unlock;
 	}
+
+	__hi3593_channel_default_config(chan);
 
 	switch (chan->type) {
 	case RECEIVER_1:
@@ -1116,9 +1120,6 @@ static int hi3593_close(struct net_device *ndev)
 		BUG();
 		break;
 	}
-
-	/* put channel into default state */
-	__hi3593_channel_default_config(chan);
 
 	adev->active_channels--;
 
