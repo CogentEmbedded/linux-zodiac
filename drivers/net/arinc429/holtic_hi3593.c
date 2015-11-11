@@ -265,6 +265,7 @@ struct hi3593_priv;
  * @rate: channel rate
  * @work: workitem for RX or TX message processing
  * @irq_enable_timer: timeout to re-enable single message RX interrupt
+ * @fifo_full: used to stop pushing messages to HW after TX FIFO FULL IRQ
  */
 struct hi3593_channel_priv {
 	struct arinc429_priv	arinc429;	/* must be the first member */
@@ -277,6 +278,8 @@ struct hi3593_channel_priv {
 	struct work_struct	work;
 
 	struct timer_list	irq_enable_timer;
+
+	atomic_t fifo_full;
 };
 
 /* HoltIC HI-3953 chip specific private data
@@ -300,6 +303,7 @@ struct hi3593_channel_priv {
  * @tx_empty: TFEMPTY interrupt GPIO pin
  * @freq: ARINC429 bus reference clock
  * @txq: TX queue
+ * @txq_count: amount of messages in TX queue
  */
 struct hi3593_priv {
 	struct spi_device		*spi;
@@ -319,6 +323,7 @@ struct hi3593_priv {
 	int				tx_empty;
 	u32				freq;
 	struct sk_buff_head		txq;
+	atomic_t		txq_count;
 };
 
 #ifdef CONFIG_DEBUG_FS
@@ -529,7 +534,7 @@ static void hi3593_tx_work_handler(struct work_struct *ws)
 
 	netdev_vdbg(chan->ndev, "%s: enter\n", __func__);
 
-	while (!last) {
+	while (!last && !atomic_read(&chan->fifo_full)) {
 		txb = skb_dequeue(&adev->txq);
 		last = skb_queue_empty(&adev->txq);
 		if (txb) {
@@ -558,11 +563,16 @@ static void hi3593_tx_work_handler(struct work_struct *ws)
 			}
 
 			dev_kfree_skb(txb);
+			atomic_dec(&adev->txq_count);
 
 			netdev_vdbg(ndev, "packet sent, label: %#o ret: %d\n",
 				af->label, ret);
 		}
 	}
+
+	/* ok, HW accepted all queued buffers, allow more data to be sent */
+	if (last && netif_queue_stopped(chan->ndev))
+		netif_wake_queue(chan->ndev);
 }
 
 static void hi3593_rx_work_handler(struct work_struct *ws)
@@ -801,6 +811,8 @@ static irqreturn_t hi3593_tx_full_irq(int irq, void *dev_id)
 
 	dev_vdbg(&chan->adev->spi->dev, "%s: enter\n", __func__);
 
+	atomic_set(&chan->fifo_full, 1);
+
 	netif_stop_queue(chan->ndev);
 
 	disable_irq_nosync(irq);
@@ -817,11 +829,17 @@ static irqreturn_t hi3593_tx_empty_irq(int irq, void *dev_id)
 
 	dev_vdbg(&chan->adev->spi->dev, "%s: enter\n", __func__);
 
-	netif_wake_queue(chan->ndev);
-
 	disable_irq_nosync(irq);
 
+	atomic_set(&chan->fifo_full, 0);
+
 	enable_irq(gpio_to_irq(adev->tx_full));
+
+	/* do not accept new transmit requests until all buffers are sent */
+	if (skb_queue_empty(&chan->adev->txq))
+		netif_wake_queue(chan->ndev);
+	else
+		schedule_work(&chan->work);
 
 	return IRQ_HANDLED;
 }
@@ -1102,14 +1120,7 @@ static int hi3593_close(struct net_device *ndev)
 	case TRANSMITTER:
 		flush_work(&chan->work);
 
-		/* ensure any queued tx buffers are dumped */
-		while (!skb_queue_empty(&adev->txq)) {
-			struct sk_buff *txb = skb_dequeue(&adev->txq);
-
-			netdev_dbg(ndev, "%s: freeing txb %p\n", __func__, txb);
-
-			dev_kfree_skb(txb);
-		}
+		skb_queue_purge(&adev->txq);
 
 		devm_free_irq(dev, gpio_to_irq(adev->tx_full), chan);
 		devm_free_irq(dev, gpio_to_irq(adev->tx_empty), chan);
@@ -1151,6 +1162,10 @@ static int hi3593_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		return NETDEV_TX_OK;
 
 	skb_queue_tail(&adev->txq, skb);
+
+	/* keep amount of queued messages almost equal to TX FIFO size */
+	if (atomic_inc_return(&adev->txq_count) >= TX_FIFO_SIZE)
+		netif_stop_queue(chan->ndev);
 
 	schedule_work(&chan->work);
 
