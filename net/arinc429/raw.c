@@ -266,7 +266,7 @@ static int raw_init(struct sock *sk)
 	ro->count            = 1;
 
 	/* set default loopback behaviour */
-	ro->loopback         = 1;
+	ro->loopback         = 0;
 	ro->recv_own_msgs    = 0;
 	ro->fd_frames        = 0;
 	ro->join_filters     = 0;
