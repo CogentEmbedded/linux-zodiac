@@ -486,7 +486,7 @@ static inline void hi3593_register_debugfs(struct hi3593_priv *adev) {}
 static inline void hi3593_unregister_debugfs(struct hi3593_priv *adev) {}
 #endif
 
-static void hi3593_rx_buf_until_empty(struct hi3593_channel_priv *chan);
+static void hi3593_receive(struct hi3593_channel_priv *chan);
 
 static inline bool hi3593_is_transmitter(enum channel_type channel_type)
 {
@@ -586,15 +586,13 @@ static void hi3593_tx_work_handler(struct work_struct *ws)
 		netif_wake_queue(chan->ndev);
 }
 
-static void hi3593_rx_work_handler(struct work_struct *ws)
+
+static inline void
+hi3593_enable_rx_interrupt(struct hi3593_channel_priv *chan)
 {
-	struct hi3593_channel_priv *chan = container_of(ws,
-			struct hi3593_channel_priv, work);
 	int irq;
 
 	netdev_vdbg(chan->ndev, "%s: enter\n", __func__);
-
-	hi3593_rx_buf_until_empty(chan);
 
 	switch (chan->type) {
 	case RECEIVER_1:
@@ -609,8 +607,18 @@ static void hi3593_rx_work_handler(struct work_struct *ws)
 	}
 
 	enable_irq(irq);
+}
 
-	netdev_vdbg(chan->ndev, "%s: irq %d enabled\n", __func__, irq);
+static void hi3593_rx_work_handler(struct work_struct *ws)
+{
+	struct hi3593_channel_priv *chan = container_of(ws,
+			struct hi3593_channel_priv, work);
+
+	netdev_vdbg(chan->ndev, "%s: enter\n", __func__);
+
+	hi3593_receive(chan);
+
+	hi3593_enable_rx_interrupt(chan);
 }
 
 static int hi3593_master_reset(struct hi3593_priv *adev)
@@ -666,6 +674,8 @@ static inline void hi3593_restart_timer(struct hi3593_channel_priv *chan)
 {
 	u32 wait_jiffies;
 
+	netdev_vdbg(chan->ndev, "%s: enter\n", __func__);
+
 	if (chan->rate == RATE_HIGH)
 		wait_jiffies = usecs_to_jiffies(
 			chan->irq_coalescing * HIGH_RATE_MESSAGE_TIME);
@@ -676,8 +686,7 @@ static inline void hi3593_restart_timer(struct hi3593_channel_priv *chan)
 	mod_timer(&chan->irq_enable_timer, jiffies + wait_jiffies);
 }
 
-static void
-hi3593_enable_timer(unsigned long arg)
+static void hi3593_flag_irq_timeout(unsigned long arg)
 {
 	struct hi3593_channel_priv *chan = (struct hi3593_channel_priv *)arg;
 
@@ -728,38 +737,52 @@ static void hi3593_rx_buf(struct hi3593_channel_priv *chan)
 		af->label, af->data[0], af->data[1], af->data[2]);
 }
 
-static void hi3593_rx_buf_until_empty(struct hi3593_channel_priv *chan)
+static void hi3593_receive(struct hi3593_channel_priv *chan)
 {
 	u8 msg_count = 0;
 	u8 status;
 	u8 i;
 	int ret;
 
-	while (true) {
+	ret = spi_write_then_read(chan->adev->spi,
+			&read_sr_cmds[chan->type], 1, &status, 1);
+	if (ret) {
+		netdev_err(chan->ndev, "unable to get Receiver status\n");
+		return;
+	}
+
+	if (status & RECEIVER_STATUS_FIFO_EMPTY)
+		return;
+
+	/* try to read as many messages as possible without status bit check */
+	if (status & RECEIVER_STATUS_FIFO_FULL) {
+		msg_count = RX_FIFO_SIZE;
+	} else	if (status & RECEIVER_STATUS_FIFO_HALF_FULL) {
+		msg_count = RX_FIFO_SIZE / 2;
+	}
+
+	if (likely(msg_count)) {
+		for (i = 0; i < msg_count; i++)
+			hi3593_rx_buf(chan);
+		return;
+	}
+
+	/* there is no indication of how many messages are in RX FIFO.
+	 * It is known that at least one is there and max is half FIFO size - 1 */
+	for (i = 0; i < RX_FIFO_SIZE / 2 - 1; i++) {
+		hi3593_rx_buf(chan);
+
 		ret = spi_write_then_read(chan->adev->spi,
-				&read_sr_cmds[chan->type], 1, &status, 1);
+				&read_sr_cmds[chan->type], 1,
+				&status, 1);
 		if (ret) {
-			netdev_err(chan->ndev, "unable to get Receiver status\n");
+			netdev_err(chan->ndev,
+				"unable to get Receiver status\n");
 			return;
 		}
 
 		if (status & RECEIVER_STATUS_FIFO_EMPTY)
 			return;
-
-		/* it is possible that more messages arrived meanwhile */
-		if (status & RECEIVER_STATUS_FIFO_FULL) {
-			msg_count = RX_FIFO_SIZE;
-		} else	if (status & RECEIVER_STATUS_FIFO_HALF_FULL) {
-			msg_count = RX_FIFO_SIZE / 2;
-		} else if (!(status & RECEIVER_STATUS_FIFO_EMPTY)) {
-			/* there is no indication of how many messages are in RX FIFO.
-			 * It is known that at least one is there, so set count to one
-			 * and fall back to one-by-one read until FIFO becomes empty */
-			msg_count = 1;
-		}
-
-		for (i = 0; i < msg_count; i++)
-			hi3593_rx_buf(chan);
 	}
 }
 
@@ -769,25 +792,17 @@ static irqreturn_t hi3593_rx_irq(int irq, void *dev_id)
 
 	netdev_vdbg(chan->ndev, "%s: enter\n", __func__);
 
-	if (chan->irq_coalescing) {
+	disable_irq_nosync(irq);
+
+	if (chan->irq_coalescing)
 		del_timer(&chan->irq_enable_timer);
 
-		/* IRQ handler will grab all pending messages,
-		 * no need for work execution this time */
-		cancel_work_sync(&chan->work);
+	hi3593_receive(chan);
 
-		disable_irq_nosync(irq);
-
-		hi3593_rx_buf_until_empty(chan);
-
+	if (chan->irq_coalescing)
 		hi3593_restart_timer(chan);
-	} else {
-		disable_irq_nosync(irq);
-
-		hi3593_rx_buf_until_empty(chan);
-
+	else
 		enable_irq(irq);
-	}
 
 	return IRQ_HANDLED;
 }
@@ -798,19 +813,15 @@ static irqreturn_t hi3593_rx_flag_irq(int irq, void *dev_id)
 
 	netdev_vdbg(chan->ndev, "%s: enter\n", __func__);
 
-	del_timer(&chan->irq_enable_timer);
-
-	/* IRQ handler will grab all pending messages,
-	 * no need for RX work execution this time */
-	cancel_work_sync(&chan->work);
-
 	disable_irq_nosync(irq);
 
-	hi3593_rx_buf_until_empty(chan);
+	del_timer(&chan->irq_enable_timer);
 
-	enable_irq(irq);
+	hi3593_receive(chan);
 
 	hi3593_restart_timer(chan);
+
+	enable_irq(irq);
 
 	return IRQ_HANDLED;
 }
@@ -985,7 +996,7 @@ static int hi3593_open(struct net_device *ndev)
 
 		init_timer(&chan->irq_enable_timer);
 		chan->irq_enable_timer.data = (unsigned long)chan;
-		chan->irq_enable_timer.function = hi3593_enable_timer;
+		chan->irq_enable_timer.function = hi3593_flag_irq_timeout;
 
 		INIT_WORK(&chan->work, hi3593_rx_work_handler);
 
@@ -1026,7 +1037,7 @@ static int hi3593_open(struct net_device *ndev)
 
 		init_timer(&chan->irq_enable_timer);
 		chan->irq_enable_timer.data = (unsigned long)chan;
-		chan->irq_enable_timer.function = hi3593_enable_timer;
+		chan->irq_enable_timer.function = hi3593_flag_irq_timeout;
 
 		INIT_WORK(&chan->work, hi3593_rx_work_handler);
 
