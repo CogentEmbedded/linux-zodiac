@@ -344,7 +344,7 @@
 		pinctrl-0 = <&pinctrl_gpio_hi3593>;
 		pinctrl-names = "default";
 		reg = <0>;
-		spi-max-frequency = <5000000>;
+		spi-max-frequency = <10000000>;
 
 		master_reset-gpio = <&gpio5 2 GPIO_ACTIVE_HIGH>;
 		r1_int-gpio = <&gpio3 13 GPIO_ACTIVE_HIGH>;
