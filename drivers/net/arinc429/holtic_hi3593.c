@@ -1111,10 +1111,6 @@ static int hi3593_close(struct net_device *ndev)
 
 	netdev_dbg(ndev, "%s: enter\n", __func__);
 
-	netif_stop_queue(ndev);
-
-	close_arinc429dev(ndev);
-
 	mutex_lock(&adev->dev_lock);
 
 	switch (chan->type) {
@@ -1139,6 +1135,8 @@ static int hi3593_close(struct net_device *ndev)
 		break;
 
 	case TRANSMITTER:
+		netif_stop_queue(ndev);
+
 		flush_work(&chan->work);
 
 		skb_queue_purge(&adev->txq);
@@ -1152,6 +1150,8 @@ static int hi3593_close(struct net_device *ndev)
 		BUG();
 		break;
 	}
+
+	close_arinc429dev(ndev);
 
 	adev->active_channels--;
 
