@@ -298,6 +298,7 @@ struct hi3593_channel_priv {
  * @spi: spi device
  * @dev_lock: lock protecting this structure
  * @active_channels: amount of opened channels
+ * @labels: label for each channel provided via device tree
  * @channels: channels private data
  * @ctrl_regs: cached control registers for each channel
  * @flag_iar: cached FLAG/Interrupt Assignment Register
@@ -306,10 +307,8 @@ struct hi3593_channel_priv {
                      to reverse byte order befor writing into HW as it takes
                      label bitmap from 0377 to 0000
  * @hw_reset: external master reset GPIO pin
- * @r1_int: R1INT interrupt GPIO pin
- * @r1_flag: R1FLAG interrupt GPIO pin
- * @r2_int: R2INT interrupt GPIO pin
- * @r2_flag: R2FLAG interrupt GPIO pin
+ * @rx_int: RxINT interrupt GPIO pin
+ * @rx_flag: RxFLAG interrupt GPIO pin
  * @tx_full: TFULL interrupt GPIO pin
  * @tx_empty: TFEMPTY interrupt GPIO pin
  * @freq: ARINC429 bus reference clock
@@ -320,16 +319,15 @@ struct hi3593_priv {
 	struct spi_device		*spi;
 	struct mutex			dev_lock;
 	int				active_channels;
+	const char*			labels[NUM_CHANNELS];
 	struct hi3593_channel_priv	*channels[NUM_CHANNELS];
 	u8				ctrl_regs[NUM_CHANNELS];
 	u8				flag_iar;
 	DECLARE_BITMAP(			r1_label_filter, NUM_LABELS);
 	DECLARE_BITMAP(			r2_label_filter, NUM_LABELS);
 	int				hw_reset;
-	int				r1_int;
-	int				r1_flag;
-	int				r2_int;
-	int				r2_flag;
+	int				rx_int[NUM_RECEIVERS];
+	int				rx_flag[NUM_RECEIVERS];
 	int				tx_full;
 	int				tx_empty;
 	u32				freq;
@@ -587,28 +585,6 @@ static void hi3593_tx_work_handler(struct work_struct *ws)
 }
 
 
-static inline void
-hi3593_enable_rx_interrupt(struct hi3593_channel_priv *chan)
-{
-	int irq;
-
-	netdev_vdbg(chan->ndev, "%s: enter\n", __func__);
-
-	switch (chan->type) {
-	case RECEIVER_1:
-		irq = gpio_to_irq(chan->adev->r1_int);
-		break;
-	case RECEIVER_2:
-		irq = gpio_to_irq(chan->adev->r2_int);
-		break;
-	default:
-		BUG();
-		break;
-	}
-
-	enable_irq(irq);
-}
-
 static void hi3593_rx_work_handler(struct work_struct *ws)
 {
 	struct hi3593_channel_priv *chan = container_of(ws,
@@ -618,7 +594,7 @@ static void hi3593_rx_work_handler(struct work_struct *ws)
 
 	hi3593_receive(chan);
 
-	hi3593_enable_rx_interrupt(chan);
+	enable_irq(gpio_to_irq(chan->adev->rx_int[chan->type]));
 }
 
 static int hi3593_master_reset(struct hi3593_priv *adev)
@@ -961,75 +937,41 @@ static int hi3593_open(struct net_device *ndev)
 
 	switch (chan->type) {
 	case RECEIVER_1:
-		if (!gpio_is_valid(adev->r1_int) || 
-		    !gpio_is_valid(adev->r1_flag)) {
-			netdev_err(ndev, "GPIO lines for R1 IRQs are invalid\n");
-			ret = -EINVAL;
-			goto err_unlock;
-		}
-
-		ret = devm_request_threaded_irq(dev,
-			gpio_to_irq(adev->r1_int),
-			NULL,
-			hi3593_rx_irq,
-			IRQF_ONESHOT | IRQF_TRIGGER_FALLING,
-			DRV_NAME "-rx1",
-			chan);
-		if (ret) {
-			netdev_err(ndev, "failed to acquire r1-int\n");
-			goto err_unlock;
-		}
-
-		ret = devm_request_threaded_irq(dev,
-			gpio_to_irq(adev->r1_flag),
-			NULL,
-			hi3593_rx_flag_irq,
-			IRQF_ONESHOT | IRQF_TRIGGER_HIGH,
-			DRV_NAME "-rx1-flag",
-			chan);
-		if (ret) {
-			netdev_err(ndev, "failed to acquire r1-flag\n");
-			goto err_unlock;
-		}
-
-		chan->irq_coalescing = DEFAULT_IRQ_COALESCING;
-
-		init_timer(&chan->irq_enable_timer);
-		chan->irq_enable_timer.data = (unsigned long)chan;
-		chan->irq_enable_timer.function = hi3593_flag_irq_timeout;
-
-		INIT_WORK(&chan->work, hi3593_rx_work_handler);
-
-		break;
-
 	case RECEIVER_2:
-		if (!gpio_is_valid(adev->r2_int) || 
-		    !gpio_is_valid(adev->r2_flag)) {
-			netdev_err(ndev, "GPIO lines for R2 IRQs are invalid\n");
+		if (!gpio_is_valid(adev->rx_int[chan->type]) ||
+			!gpio_is_valid(adev->rx_flag[chan->type])) {
+			netdev_err(ndev,
+				"GPIO lines for receiver %d IRQs are invalid\n",
+				(int)chan->type + 1);
 			ret = -EINVAL;
 			goto err_unlock;
 		}
 
 		ret = devm_request_threaded_irq(dev,
-			gpio_to_irq(adev->r2_int),
+			gpio_to_irq(adev->rx_int[chan->type]),
 			NULL,
 			hi3593_rx_irq,
 			IRQF_ONESHOT | IRQF_TRIGGER_FALLING,
-			DRV_NAME "-rx2",
+			adev->labels[chan->type],
 			chan);
 		if (ret) {
-			netdev_err(ndev, "failed to acquire r2-int\n");
+			netdev_err(ndev,
+				"failed to acquire receiver %d interrupt\n",
+				(int)chan->type + 1);
 			goto err_unlock;
 		}
+
 		ret = devm_request_threaded_irq(dev,
-			gpio_to_irq(adev->r2_flag),
+			gpio_to_irq(adev->rx_flag[chan->type]),
 			NULL,
 			hi3593_rx_flag_irq,
 			IRQF_ONESHOT | IRQF_TRIGGER_HIGH,
-			DRV_NAME "-rx2-flag",
+			adev->labels[chan->type],
 			chan);
 		if (ret) {
-			netdev_err(ndev, "failed to acquire r2-flag\n");
+			netdev_err(ndev,
+				"failed to acquire receiver %d FLAG interrupt\n",
+				(int)chan->type + 1);
 			goto err_unlock;
 		}
 
@@ -1044,8 +986,8 @@ static int hi3593_open(struct net_device *ndev)
 		break;
 
 	case TRANSMITTER:
-		if (!gpio_is_valid(adev->tx_full) || 
-		    !gpio_is_valid(adev->tx_empty)) {
+		if (!gpio_is_valid(adev->tx_full) ||
+			!gpio_is_valid(adev->tx_empty)) {
 			netdev_err(ndev, "GPIO lines for TX IRQs are invalid\n");
 			ret = -EINVAL;
 			goto err_unlock;
@@ -1115,20 +1057,11 @@ static int hi3593_close(struct net_device *ndev)
 
 	switch (chan->type) {
 	case RECEIVER_1:
+		case RECEIVER_2:
 		flush_work(&chan->work);
 
-		devm_free_irq(dev, gpio_to_irq(adev->r1_int), chan);
-		devm_free_irq(dev, gpio_to_irq(adev->r1_flag), chan);
-
-		del_timer_sync(&chan->irq_enable_timer);
-
-		break;
-
-	case RECEIVER_2:
-		flush_work(&chan->work);
-
-		devm_free_irq(dev, gpio_to_irq(adev->r2_int), chan);
-		devm_free_irq(dev, gpio_to_irq(adev->r2_flag), chan);
+		devm_free_irq(dev, gpio_to_irq(adev->rx_int[chan->type]), chan);
+		devm_free_irq(dev, gpio_to_irq(adev->rx_flag[chan->type]), chan);
 
 		del_timer_sync(&chan->irq_enable_timer);
 
@@ -1507,7 +1440,6 @@ hi3593_rx_irq_coalescing_set(struct device *d,
 	struct hi3593_channel_priv *chan = netdev_priv(dev);
 	struct hi3593_priv *adev = chan->adev;
 	unsigned long long val;
-	unsigned int irq[NUM_RECEIVERS];
 	u8 mask_bits[NUM_RECEIVERS] = {R1_FLAG_MASK, R2_FLAG_MASK};
 	u8 fifo_full_bits[NUM_RECEIVERS] =
 			{R1_FLAG_FIFO_FULL, R2_FLAG_FIFO_FULL};
@@ -1530,16 +1462,14 @@ hi3593_rx_irq_coalescing_set(struct device *d,
 	if (chan->irq_coalescing == val)
 		return count;
 
-	irq[0] = gpio_to_irq(adev->r1_flag);
-	irq[1] = gpio_to_irq(adev->r2_flag);
-
 	/* if coalescing is turned off or requested less than half of FIFO size,
 	 * disable FLAG IRQ and use only RX IRQ (with timer if N > 0) */
 	if (val < RX_FIFO_SIZE / 2) {
 		if (chan->irq_coalescing >= RX_FIFO_SIZE / 2) {
-			disable_irq(irq[chan->type]);
+			disable_irq(gpio_to_irq(adev->rx_flag[chan->type]));
 			dev_dbg(&adev->spi->dev,
-				"disabled irq: %d\n", irq[chan->type]);
+				"disabled irq: %d\n",
+				gpio_to_irq(adev->rx_flag[chan->type]));
 		}
 		goto exit;
 	}
@@ -1563,9 +1493,10 @@ hi3593_rx_irq_coalescing_set(struct device *d,
 
 	/* enable FLAG IRQ if it was disabled earlier */
 	if (chan->irq_coalescing < RX_FIFO_SIZE / 2) {
-		enable_irq(irq[chan->type]);
+		enable_irq(gpio_to_irq(adev->rx_flag[chan->type]));
 		dev_dbg(&adev->spi->dev,
-			"enabled irq: %d\n", irq[chan->type]);
+			"enabled irq: %d\n",
+			gpio_to_irq(adev->rx_flag[chan->type]));
 	}
 exit:
 	chan->irq_coalescing = val;
@@ -1602,7 +1533,7 @@ hi3593_alloc_channel(struct hi3593_priv *adev, enum channel_type type)
 
 	dev_dbg(&adev->spi->dev, "%s: enter\n", __func__);
 
-	dev = alloc_arinc429dev(sizeof(*chan), 1);
+	dev = alloc_arinc429dev(sizeof(*chan), adev->labels[type], 1);
 	if (!dev)
 		return ERR_PTR(-ENOMEM);
 
@@ -1657,18 +1588,22 @@ static void hi3593_free_channel(struct hi3593_channel_priv *chan)
  * Supported properties:
  *   arinc-frequency - ARINC429 clock frequency, (1,2,4,6..30 MHz)
  *   master_reset-gpio - external HW reset pin
- *   r1_int-gpio - Receiver 1 interrupt (R1INT)
- *   r1_flag-gpio - Receiver 1 FLAG interrupt (R1FLAG)
- *   r2_int-gpio - Receiver 2 interrupt (R2INT)
- *   r2_flag-gpio - Receiver 2 FLAG interrupt (R2FLAG)
- *   tx_full-gpio - Transmitter FIFO full interrupt (TFULL)
- *   tx_empty-gpio - Transmitter FIFO empty (TFEMPTY)
- *
+ *   rx-chan@<idx> {
+ *     label - interface name to assign
+ *     rx_int-gpio - Receiver <idx> interrupt (RxINT)
+ *     rx_flag-gpio - Receiver <idx> FLAG interrupt (RxFLAG)
+ *   }
+ *   tx-chan@<idx> {
+ *     label - interface name to assign
+ *     tx_full-gpio - Transmitter FIFO full interrupt (TFULL)
+ *     tx_empty-gpio - Transmitter FIFO empty (TFEMPTY)
+ *   }
  */
 static int hi3593_probe_dt(struct hi3593_priv *adev)
 {
 	struct device *dev = &adev->spi->dev;
 	struct device_node *node = dev->of_node;
+	struct device_node *chan;
 	int ret;
 
 	if (!node) {
@@ -1695,41 +1630,82 @@ static int hi3593_probe_dt(struct hi3593_priv *adev)
 				GPIOF_OUT_INIT_LOW, "HI-3593 Reset"))
 			adev->hw_reset = -EINVAL;
 
-	adev->r1_int = of_get_named_gpio(node, "r1_int-gpio", 0);
-	if (gpio_is_valid(adev->r1_int))
-		if (devm_gpio_request_one(dev, adev->r1_int,
-				GPIOF_IN, "HI-3593 Receiver 1 interrupt pin"))
-			adev->r1_int = -EINVAL;
+	/* Receiver 1 */
+	chan = of_get_child_by_name(node, "rx1-chan");
+	if (!chan) {
+		dev_err(dev, "Failed to get rx1-chan node\n");
+		return -EINVAL;
+	}
+	adev->labels[RECEIVER_1] =
+		of_get_property(chan, "label", NULL) ? : "arinc429rx%d";
 
-	adev->r1_flag = of_get_named_gpio(node, "r1_flag-gpio", 0);
-	if (gpio_is_valid(adev->r1_flag))
-		if (devm_gpio_request_one(dev, adev->r1_flag,
-				GPIOF_IN, "HI-3593 Receiver 1 flag pin"))
-			adev->r1_flag = -EINVAL;
+	adev->rx_int[RECEIVER_1] = of_get_named_gpio(chan, "int-gpio", 0);
+	if (!gpio_is_valid(adev->rx_int[RECEIVER_1]) ||
+		devm_gpio_request_one(dev, adev->rx_int[RECEIVER_1],
+				GPIOF_IN, "HI-3593 Receiver 1 INT pin")) {
+		dev_err(dev, "Failed to get RX IRQ GPIO\n");
+		return -EINVAL;
+	}
 
-	adev->r2_int = of_get_named_gpio(node, "r2_int-gpio", 0);
-	if (gpio_is_valid(adev->r2_int))
-		if (devm_gpio_request_one(dev, adev->r2_int,
-				GPIOF_IN, "HI-3593 Receiver 2 interrupt pin"))
-			adev->r2_int = -EINVAL;
+	adev->rx_flag[RECEIVER_1] = of_get_named_gpio(chan, "flag-gpio", 0);
+	if (!gpio_is_valid(adev->rx_flag[RECEIVER_1]) ||
+		devm_gpio_request_one(dev, adev->rx_flag[RECEIVER_1],
+				GPIOF_IN, "HI-3593 Receiver 1 FLAG pin")) {
+		dev_err(dev, "Failed to get RX FLAG IRQ GPIO\n");
+		return -EINVAL;
+	}
 
-	adev->r2_flag = of_get_named_gpio(node, "r2_flag-gpio", 0);
-	if (gpio_is_valid(adev->r2_flag))
-		if (devm_gpio_request_one(dev, adev->r2_flag,
-				GPIOF_IN, "HI-3593 Receiver 2 flag pin"))
-			adev->r2_flag = -EINVAL;
+	/* Receiver 2 */
+	chan = of_get_child_by_name(node, "rx2-chan");
+	if (!chan) {
+		dev_err(dev, "Failed to get rx2-chan node\n");
+		return -EINVAL;
+	}
+	adev->labels[RECEIVER_2] =
+		of_get_property(chan, "label", NULL) ? : "arinc429rx%d";
 
-	adev->tx_full = of_get_named_gpio(node, "tx_full-gpio", 0);
-	if (gpio_is_valid(adev->tx_full))
-		if (devm_gpio_request_one(dev, adev->tx_full,
-				GPIOF_IN, "HI-3593 Transmit FIFO full"))
+	adev->rx_int[RECEIVER_2] = of_get_named_gpio(chan, "int-gpio", 0);
+	if (!gpio_is_valid(adev->rx_int[RECEIVER_2]) ||
+		devm_gpio_request_one(dev, adev->rx_int[RECEIVER_2],
+				GPIOF_IN, "HI-3593 Receiver 2 INT pin")) {
+		dev_err(dev, "Failed to get RX IRQ GPIO\n");
+		return -EINVAL;
+	}
+
+	adev->rx_flag[RECEIVER_2] = of_get_named_gpio(chan, "flag-gpio", 0);
+	if (!gpio_is_valid(adev->rx_flag[RECEIVER_2]) ||
+		devm_gpio_request_one(dev, adev->rx_flag[RECEIVER_2],
+				GPIOF_IN, "HI-3593 Receiver 2 FLAG pin")) {
+		dev_err(dev, "Failed to get RX FLAG IRQ GPIO\n");
+		return -EINVAL;
+	}
+
+	/* Transmitter */
+	chan = of_get_child_by_name(node, "tx-chan");
+	if (!chan) {
+		dev_err(dev, "Failed to get tx-chan node\n");
+		return -EINVAL;
+	}
+	adev->labels[TRANSMITTER] =
+		of_get_property(chan, "label", NULL) ? : "arinc429tx%d";
+
+	adev->tx_full = of_get_named_gpio(chan, "full-gpio", 0);
+	if (!gpio_is_valid(adev->tx_full) ||
+		devm_gpio_request_one(dev, adev->tx_full,
+				GPIOF_IN, "HI-3593 Transmit FIFO full")) {
 			adev->tx_full = -EINVAL;
+		dev_err(dev, "Failed to get TX FULL IRQ GPIO\n");
+		return -EINVAL;
+	}
 
-	adev->tx_empty = of_get_named_gpio(node, "tx_empty-gpio", 0);
-	if (gpio_is_valid(adev->tx_empty))
-		if (devm_gpio_request_one(dev, adev->tx_empty,
-				GPIOF_IN, "HI-3593 Transmit FIFO empty"))
+	adev->tx_empty = of_get_named_gpio(chan, "empty-gpio", 0);
+	if (!gpio_is_valid(adev->tx_empty) ||
+		devm_gpio_request_one(dev, adev->tx_empty,
+				GPIOF_IN, "HI-3593 Transmit FIFO empty")) {
 			adev->tx_empty = -EINVAL;
+		dev_err(dev, "Failed to get TX EMPTY IRQ GPIO\n");
+		return -EINVAL;
+	}
 
 	return 0;
 }

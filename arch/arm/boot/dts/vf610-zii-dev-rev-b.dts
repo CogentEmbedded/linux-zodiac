@@ -347,12 +347,21 @@
 		spi-max-frequency = <10000000>;
 
 		master_reset-gpio = <&gpio5 2 GPIO_ACTIVE_HIGH>;
-		r1_int-gpio = <&gpio3 13 GPIO_ACTIVE_HIGH>;
-		r1_flag-gpio = <&gpio3 15 GPIO_ACTIVE_HIGH>;
-		r2_int-gpio = <&gpio3 14 GPIO_ACTIVE_HIGH>;
-		r2_flag-gpio = <&gpio3 1 GPIO_ACTIVE_HIGH>;
-		tx_full-gpio = <&gpio3 12 GPIO_ACTIVE_HIGH>;
-		tx_empty-gpio = <&gpio3 11 GPIO_ACTIVE_HIGH>;
+		rx1-chan {
+			  label = "arinc429rx1";
+			  int-gpio = <&gpio3 13 GPIO_ACTIVE_HIGH>;
+			  flag-gpio = <&gpio3 15 GPIO_ACTIVE_HIGH>;
+		};
+		rx2-chan {
+			  label = "arinc429rx2";
+			  int-gpio = <&gpio3 14 GPIO_ACTIVE_HIGH>;
+			  flag-gpio = <&gpio3 1 GPIO_ACTIVE_HIGH>;
+		};
+		tx-chan {
+			  label = "arinc429tx1";
+			  full-gpio = <&gpio3 12 GPIO_ACTIVE_HIGH>;
+			  empty-gpio = <&gpio3 11 GPIO_ACTIVE_HIGH>;
+		};
 	};
 };
 
