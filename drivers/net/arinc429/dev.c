@@ -321,7 +321,8 @@ EXPORT_SYMBOL_GPL(alloc_arinc429_err_skb);
 /*
  * Allocate and setup space for the ARINC429 network device
  */
-struct net_device *alloc_arinc429dev(int sizeof_priv, unsigned int echo_skb_max)
+struct net_device *alloc_arinc429dev(int sizeof_priv, const char *name,
+			unsigned int echo_skb_max)
 {
 	struct net_device *dev;
 	struct arinc429_priv *priv;
@@ -333,7 +334,8 @@ struct net_device *alloc_arinc429dev(int sizeof_priv, unsigned int echo_skb_max)
 	else
 		size = sizeof_priv;
 
-	dev = alloc_netdev(size, "arinc429-%d", NET_NAME_UNKNOWN, arinc429_setup);
+	dev = alloc_netdev(size, name ? name : "arinc429-%d",
+			NET_NAME_UNKNOWN, arinc429_setup);
 	if (!dev)
 		return NULL;
 

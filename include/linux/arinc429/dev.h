@@ -65,7 +65,8 @@ inval_skb:
 	return 1;
 }
 
-struct net_device *alloc_arinc429dev(int sizeof_priv, unsigned int echo_skb_max);
+struct net_device *alloc_arinc429dev(int sizeof_priv, const char *name,
+		unsigned int echo_skb_max);
 void free_arinc429dev(struct net_device *dev);
 
 /* a arinc429dev safe wrapper around netdev_priv */
