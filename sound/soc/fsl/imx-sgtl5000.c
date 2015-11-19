@@ -18,6 +18,7 @@
 #include <sound/soc.h>
 
 #include "../codecs/sgtl5000.h"
+#include "../codecs/tpa6130a2.h"
 #include "imx-audmux.h"
 
 #define DAI_NAME_SIZE	32
@@ -29,10 +30,12 @@ struct imx_sgtl5000_data {
 	char platform_name[DAI_NAME_SIZE];
 	struct clk *codec_clk;
 	unsigned int clk_frequency;
+	struct device_node *amp_of_node;
 };
 
 static int imx_sgtl5000_dai_init(struct snd_soc_pcm_runtime *rtd)
 {
+	struct snd_soc_codec *codec = rtd->codec;
 	struct imx_sgtl5000_data *data = snd_soc_card_get_drvdata(rtd->card);
 	struct device *dev = rtd->card->dev;
 	int ret;
@@ -42,6 +45,15 @@ static int imx_sgtl5000_dai_init(struct snd_soc_pcm_runtime *rtd)
 	if (ret) {
 		dev_err(dev, "could not set codec driver clock params\n");
 		return ret;
+	}
+
+	if (data->amp_of_node) {
+		ret = tpa6130a2_add_controls(codec);
+		if (ret) {
+			dev_err(dev, "could not add amp controls\n");
+			return ret;
+		}
+		tpa6130a2_stereo_enable(codec, 1);
 	}
 
 	return 0;
@@ -58,7 +70,7 @@ static const struct snd_soc_dapm_widget imx_sgtl5000_dapm_widgets[] = {
 static int imx_sgtl5000_probe(struct platform_device *pdev)
 {
 	struct device_node *np = pdev->dev.of_node;
-	struct device_node *ssi_np, *codec_np;
+	struct device_node *ssi_np, *codec_np, *amp_np;
 	struct platform_device *ssi_pdev;
 	struct i2c_client *codec_dev;
 	struct imx_sgtl5000_data *data = NULL;
@@ -121,6 +133,10 @@ static int imx_sgtl5000_probe(struct platform_device *pdev)
 		return -EPROBE_DEFER;
 	}
 
+	amp_np = of_parse_phandle(np, "headphone-amplifier", 0);
+	if (!amp_np)
+		dev_err(&pdev->dev, "Headphone amplifier node is not provided\n");
+
 	data = devm_kzalloc(&pdev->dev, sizeof(*data), GFP_KERNEL);
 	if (!data) {
 		ret = -ENOMEM;
@@ -135,6 +151,7 @@ static int imx_sgtl5000_probe(struct platform_device *pdev)
 
 	data->clk_frequency = clk_get_rate(data->codec_clk);
 
+	data->amp_of_node = amp_np;
 	data->dai.name = "HiFi";
 	data->dai.stream_name = "HiFi";
 	data->dai.codec_dai_name = "sgtl5000";
