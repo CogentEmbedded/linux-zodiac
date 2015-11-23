@@ -24,6 +24,7 @@
 #define TPA6130A2_PLAT_H
 
 struct tpa6130a2_platform_data {
+	bool ext_pd;
 	int power_gpio;
 };
 
