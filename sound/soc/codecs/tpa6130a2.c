@@ -49,7 +49,10 @@ struct tpa6130a2_data {
 	struct regulator *supply;
 	int power_gpio;
 	u8 power_state:1;
+	u8 power_state_delayed:1;
 	enum tpa_model id;
+	bool ext_pd;
+	bool probed;
 };
 
 static int tpa6130a2_i2c_read(int reg)
@@ -138,7 +141,14 @@ static int tpa6130a2_power(u8 power)
 	data = i2c_get_clientdata(tpa6130a2_client);
 
 	mutex_lock(&data->mutex);
+
+	data->power_state_delayed = power;
+
 	if (power == data->power_state)
+		goto exit;
+
+	/* in ext PD? */
+	if ((data->ext_pd) && (!gpio_get_value(data->power_gpio)))
 		goto exit;
 
 	if (power) {
@@ -149,7 +159,7 @@ static int tpa6130a2_power(u8 power)
 			goto exit;
 		}
 		/* Power on */
-		if (data->power_gpio >= 0)
+		if ((data->power_gpio >= 0) && (!data->ext_pd))
 			gpio_set_value(data->power_gpio, 1);
 
 		data->power_state = 1;
@@ -157,7 +167,7 @@ static int tpa6130a2_power(u8 power)
 		if (ret < 0) {
 			dev_err(&tpa6130a2_client->dev,
 				"Failed to initialize chip\n");
-			if (data->power_gpio >= 0)
+			if ((data->power_gpio >= 0) && (!data->ext_pd))
 				gpio_set_value(data->power_gpio, 0);
 			regulator_disable(data->supply);
 			data->power_state = 0;
@@ -170,7 +180,7 @@ static int tpa6130a2_power(u8 power)
 		tpa6130a2_i2c_write(TPA6130A2_REG_CONTROL, val);
 
 		/* Power off */
-		if (data->power_gpio >= 0)
+		if ((data->power_gpio >= 0) && (!data->ext_pd))
 			gpio_set_value(data->power_gpio, 0);
 
 		ret = regulator_disable(data->supply);
@@ -292,6 +302,58 @@ static const struct snd_kcontrol_new tpa6140a2_controls[] = {
 		       tpa6140_tlv),
 };
 
+static int tpa6130a2_get_version(void)
+{
+	int ret;
+	int power_state;
+	struct	tpa6130a2_data *data;
+
+	data = i2c_get_clientdata(tpa6130a2_client);
+	power_state = data->power_state_delayed;
+
+	ret = tpa6130a2_power(1);
+	if (ret != 0)
+		return ret;
+
+	/* Read version */
+	ret = tpa6130a2_i2c_read(TPA6130A2_REG_VERSION) &
+				 TPA6130A2_VERSION_MASK;
+	if ((ret != 1) && (ret != 2))
+		dev_warn(&tpa6130a2_client->dev,
+			"UNTESTED version detected (%d)\n", ret);
+
+	/* Disable the chip */
+	return tpa6130a2_power(power_state);
+}
+/*
+ * This interrupt detects the state of the externally controlled
+ * shutdown pin. when the amp is brought out of shutdown, the
+ * shadowed register values must be restored. shutdown mode is low true,
+ * so the detection state of the interrupt is IRQF_TRIGGER_RISING.
+ */
+static irqreturn_t tpa6130a2_shutdown_irq_handler(int irq, void *dev_id)
+{
+	struct tpa6130a2_data *data = (struct tpa6130a2_data *)dev_id;
+	int wakeup = gpio_get_value(data->power_gpio);
+	pr_debug(KERN_DEBUG "%s %s\n", __func__, wakeup ? "enabled" : "disabled");
+
+	if (wakeup) {
+		if (!data->probed) {
+			tpa6130a2_get_version();
+			data->probed = true;
+		}
+
+		tpa6130a2_power(data->power_state_delayed);
+
+		tpa6130a2_i2c_write(TPA6130A2_REG_CONTROL, data->regs[TPA6130A2_REG_CONTROL]);
+		tpa6130a2_i2c_write(TPA6130A2_REG_VOL_MUTE, data->regs[TPA6130A2_REG_VOL_MUTE]);
+	} else {
+		data->power_state = 0;
+	}
+
+	return IRQ_HANDLED;
+}
+
 /*
  * Enable or disable channel (left or right)
  * The bit number for mute and amplifier are the same per channel:
@@ -383,12 +445,23 @@ static int tpa6130a2_probe(struct i2c_client *client,
 		return -ENOMEM;
 
 	if (pdata) {
+		data->ext_pd = pdata->ext_pd;
+	} else if (np) {
+		data->ext_pd = of_property_read_bool(np, "external-pd");
+	}
+
+	if (pdata) {
 		data->power_gpio = pdata->power_gpio;
 	} else if (np) {
 		data->power_gpio = of_get_named_gpio(np, "power-gpio", 0);
 	} else {
 		dev_err(dev, "Platform data not set\n");
 		dump_stack();
+		return -ENODEV;
+	}
+
+	if ((data->ext_pd) && (!data->power_gpio)) {
+		dev_err(dev, "No power-gpio while in ext. PD mode\n");
 		return -ENODEV;
 	}
 
@@ -411,9 +484,12 @@ static int tpa6130a2_probe(struct i2c_client *client,
 		if (ret < 0) {
 			dev_err(dev, "Failed to request power GPIO (%d)\n",
 				data->power_gpio);
-			goto err_gpio;
+			goto err_exit;
 		}
-		gpio_direction_output(data->power_gpio, 0);
+		if (data->ext_pd)
+			gpio_direction_input(data->power_gpio);
+		else
+			gpio_direction_output(data->power_gpio, 0);
 	}
 
 	switch (data->id) {
@@ -432,28 +508,35 @@ static int tpa6130a2_probe(struct i2c_client *client,
 	if (IS_ERR(data->supply)) {
 		ret = PTR_ERR(data->supply);
 		dev_err(dev, "Failed to request supply: %d\n", ret);
-		goto err_gpio;
+		goto err_exit;
 	}
 
-	ret = tpa6130a2_power(1);
-	if (ret != 0)
-		goto err_gpio;
+	if (data->ext_pd) {
+		ret = devm_request_threaded_irq(dev, gpio_to_irq(data->power_gpio),
+				NULL, tpa6130a2_shutdown_irq_handler,
+				IRQF_TRIGGER_FALLING | IRQF_TRIGGER_RISING | IRQF_ONESHOT,
+				"tpa61x0a2 shutdown", data);
+		if (ret) {
+			dev_err(dev, "Cannot request irq %d (%d)\n",
+					gpio_to_irq(data->power_gpio), ret);
+			goto err_exit;
+		}
+	}
 
+	if (!gpio_get_value(data->power_gpio)) {
+		dev_warn(dev, "Probe delayed until power down exit\n");
+		return 0;
+	}
 
-	/* Read version */
-	ret = tpa6130a2_i2c_read(TPA6130A2_REG_VERSION) &
-				 TPA6130A2_VERSION_MASK;
-	if ((ret != 1) && (ret != 2))
-		dev_warn(dev, "UNTESTED version detected (%d)\n", ret);
+	ret = tpa6130a2_get_version();
+	if (ret)
+		goto err_exit;
 
-	/* Disable the chip */
-	ret = tpa6130a2_power(0);
-	if (ret != 0)
-		goto err_gpio;
+	data->probed = true;
 
 	return 0;
 
-err_gpio:
+err_exit:
 	tpa6130a2_client = NULL;
 
 	return ret;
