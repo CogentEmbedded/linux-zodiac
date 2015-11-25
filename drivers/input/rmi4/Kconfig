@@ -1,0 +1,26 @@
+#
+# RMI4 configuration
+#
+config RMI4_CORE
+	tristate "Synaptics RMI4 bus support"
+	help
+	  Say Y here if you want to support the Synaptics RMI4 bus.  This is
+	  required for all RMI4 device support.
+
+	  If unsure, say Y.
+
+	  This feature is not currently available as a loadable module.
+
+config RMI4_DEBUG
+	bool "RMI4 Debugging"
+	depends on RMI4_CORE
+	select DEBUG_FS
+	help
+	  Say Y here to enable debug feature in the RMI4 driver.
+
+	  Note that the RMI4 driver debug features can generate a lot of
+	  output (potentially clogging up your dmesg output) and generally
+	  slow down driver operation.  It's recommended to enable them only
+	  if you are actively developing/debugging RMI4 features.
+
+	  If unsure, say N.
