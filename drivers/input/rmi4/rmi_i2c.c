@@ -9,6 +9,7 @@
 
 #include <linux/i2c.h>
 #include <linux/rmi.h>
+#include <linux/of.h>
 #include "rmi_driver.h"
 
 #define BUFFER_SIZE_INCREMENT 32
@@ -168,6 +169,14 @@ static const struct rmi_transport_ops rmi_i2c_ops = {
 	.read_block	= rmi_i2c_read_block,
 };
 
+#ifdef CONFIG_OF
+static const struct of_device_id rmi_i2c_of_match[] = {
+	{ .compatible = "syna,rmi-i2c" },
+	{},
+};
+MODULE_DEVICE_TABLE(of, rmi_i2c_of_match);
+#endif
+
 static int rmi_i2c_probe(struct i2c_client *client,
 			 const struct i2c_device_id *id)
 {
@@ -184,7 +193,7 @@ static int rmi_i2c_probe(struct i2c_client *client,
 
 	pdata = &rmi_i2c->xport.pdata;
 
-	if (client_pdata)
+	if (!client->dev.of_node && client_pdata)
 		*pdata = *client_pdata;
 
 	dev_dbg(&client->dev, "Probing %s.\n", dev_name(&client->dev));
@@ -246,6 +255,7 @@ static struct i2c_driver rmi_i2c_driver = {
 	.driver = {
 		.owner	= THIS_MODULE,
 		.name	= "rmi_i2c",
+		.of_match_table = of_match_ptr(rmi_i2c_of_match),
 	},
 	.id_table	= rmi_id,
 	.probe		= rmi_i2c_probe,
