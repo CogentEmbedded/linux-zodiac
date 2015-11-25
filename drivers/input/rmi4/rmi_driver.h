@@ -107,4 +107,12 @@ void rmi_unregister_f11_handler(void);
 static inline int rmi_register_f11_handler(void) { return 0; }
 static inline void rmi_unregister_f11_handler(void) {}
 #endif
+
+#ifdef CONFIG_RMI4_F12
+int rmi_register_f12_handler(void);
+void rmi_unregister_f12_handler(void);
+#else
+static inline int rmi_register_f12_handler(void) { return 0; }
+static inline void rmi_unregister_f12_handler(void) {}
+#endif
 #endif

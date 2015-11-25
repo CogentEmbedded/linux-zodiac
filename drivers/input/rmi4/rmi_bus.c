@@ -359,14 +359,24 @@ static int __init rmi_bus_init(void)
 		goto err_unregister_f01;
 	}
 
-	error = rmi_register_physical_driver();
+	error = rmi_register_f12_handler();
 	if (error) {
-		pr_err("%s: error registering the RMI physical driver: %d\n",
+		pr_err("%s: error registering the RMI F12 handler: %d\n",
 			__func__, error);
 		goto err_unregister_f11;
 	}
 
+	error = rmi_register_physical_driver();
+	if (error) {
+		pr_err("%s: error registering the RMI physical driver: %d\n",
+			__func__, error);
+		goto err_unregister_f12;
+	}
+
 	return 0;
+
+err_unregister_f12:
+	rmi_unregister_f12_handler();
 err_unregister_f11:
 	rmi_unregister_f11_handler();
 err_unregister_f01:
@@ -385,6 +395,7 @@ static void __exit rmi_bus_exit(void)
 	 */
 
 	rmi_unregister_physical_driver();
+	rmi_unregister_f12_handler();
 	rmi_unregister_f11_handler();
 	rmi_unregister_f01_handler();
 	bus_unregister(&rmi_bus_type);
