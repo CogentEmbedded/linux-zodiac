@@ -218,3 +218,106 @@ int rmi_2d_sensor_configure_input(struct rmi_function *fn,
 	return 0;
 }
 EXPORT_SYMBOL_GPL(rmi_2d_sensor_configure_input);
+
+#ifdef CONFIG_OF
+int rmi_2d_sensor_of_probe(struct device *dev,
+			struct rmi_2d_sensor_platform_data *pdata)
+{
+	int retval;
+
+	pdata->axis_align.swap_axes = of_property_read_bool(dev->of_node,
+						"syna,swap-axes");
+
+	pdata->axis_align.flip_x = of_property_read_bool(dev->of_node,
+						"syna,flip-x");
+
+	pdata->axis_align.flip_y = of_property_read_bool(dev->of_node,
+						"syna,flip-y");
+
+	retval = rmi_of_property_read_u16(dev,
+			&pdata->axis_align.clip_x_low,
+			"syna,clip-x-low", 1);
+	if (retval)
+		return retval;
+
+	retval = rmi_of_property_read_u16(dev,
+			&pdata->axis_align.clip_y_low,
+			"syna,clip-y-low", 1);
+	if (retval)
+		return retval;
+
+	retval = rmi_of_property_read_u16(dev,
+			&pdata->axis_align.clip_x_high,
+			"syna,clip-x-high", 1);
+	if (retval)
+		return retval;
+
+	retval = rmi_of_property_read_u16(dev,
+			&pdata->axis_align.clip_y_high,
+			"syna,clip-y-high", 1);
+	if (retval)
+		return retval;
+
+	retval = rmi_of_property_read_u16(dev,
+			&pdata->axis_align.offset_x,
+			"syna,offset-x", 1);
+	if (retval)
+		return retval;
+
+	retval = rmi_of_property_read_u16(dev,
+			&pdata->axis_align.offset_y,
+			"syna,offset_y", 1);
+	if (retval)
+		return retval;
+
+	retval = rmi_of_property_read_u8(dev,
+			&pdata->axis_align.delta_x_threshold,
+			"syna,delta-x-threshold", 1);
+	if (retval)
+		return retval;
+
+	retval = rmi_of_property_read_u8(dev,
+			&pdata->axis_align.delta_y_threshold,
+			"syna,delta-y-threshold", 1);
+	if (retval)
+		return retval;
+
+	retval = rmi_of_property_read_u32(dev,
+			(u32 *)&pdata->sensor_type,
+			"syna,sensor-type", 1);
+	if (retval)
+		return retval;
+
+	retval = rmi_of_property_read_u32(dev,
+			(u32 *)&pdata->x_mm,
+			"syna,x-mm", 1);
+	if (retval)
+		return retval;
+
+	retval = rmi_of_property_read_u32(dev,
+			(u32 *)&pdata->y_mm,
+			"syna,y-mm", 1);
+	if (retval)
+		return retval;
+
+	retval = rmi_of_property_read_u32(dev,
+			(u32 *)&pdata->disable_report_mask,
+			"syna,disable-report-mask", 1);
+	if (retval)
+		return retval;
+
+	retval = rmi_of_property_read_u16(dev, &pdata->rezero_wait,
+			"syna,rezero-wait", 1);
+	if (retval)
+		return retval;
+
+	return 0;
+}
+#else
+inline int rmi_2d_sensor_of_probe(struct device *dev,
+			struct rmi_2d_sensor_platform_data *pdata)
+{
+	return -ENODEV;
+}
+#endif
+EXPORT_SYMBOL_GPL(rmi_2d_sensor_of_probe);
