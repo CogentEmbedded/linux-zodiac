@@ -162,7 +162,10 @@ P-L filter #3, the second to P-L filter #2, and the last byte to filter #1	*/
 #define R2_INT_PL2_MSG_RECEIVED	(2 << 6)
 #define R2_INT_PL3_MSG_RECEIVED	(3 << 6)
 
-#define DEFAULT_FLAG_IAR_VALUE	(R1_FLAG_FIFO_HALF_FULL | R2_FLAG_FIFO_HALF_FULL)
+#define DEFAULT_FLAG_IAR_VALUE	(R1_INT_MSG_RECEIVED | \
+				R1_FLAG_FIFO_HALF_FULL | \
+				R2_INT_MSG_RECEIVED | \
+				R2_FLAG_FIFO_HALF_FULL)
 
 /* Receiver control register bits */
 #define RECEIVER_FLIP			(1 << 7)
@@ -250,16 +253,24 @@ enum channel_rate {
 	RATE_LOW
 };
 
-/* time in us that is taken to transfer single message at given rate.
- * 32 bits * ARINC bit time + word gap bit time */
-#define HIGH_RATE_MESSAGE_TIME	(32 * 10 + 40)
-#define LOW_RATE_MESSAGE_TIME	(32 * 80 + 320)
-
-/* by default, coalesce IRQs on half HW queue messages, if changed - review
- * default FLAG/IAR value and FLAG IRQ processing */
-#define DEFAULT_IRQ_COALESCING	(TX_FIFO_SIZE / 2)
-
 struct hi3593_priv;
+
+/* RX kernel thread (one per RX channel) that reads all available messages
+ * from RX FIFO
+ *
+ * @task - task structure
+ * @thread_done - flag to indicate end of execution
+ * @rx - flag to indicate that one or more messages are available in FIFO
+ * @wait - wait queue to sleep on
+ * @completion - indicate that thread has finished its execution
+ */
+struct hi3593_rx_thread {
+	struct task_struct	*task;
+	atomic_t		thread_done;
+	atomic_t		rx;
+	wait_queue_head_t	wait;
+	struct completion	completion;
+};
 
 /* HoltIC HI-3953 single channel private data
  *
@@ -268,14 +279,9 @@ struct hi3593_priv;
  * @adev: HI-3593 chip specific private data
  * @type: channel type
  * @rate: channel rate
- * @work: workitem for RX or TX message processing
- * @irq_enable_timer: timeout to re-enable single message RX interrupt
+ * @work: workitem for TX message processing
  * @fifo_full: used to stop pushing messages to HW after TX FIFO FULL IRQ
- * @irq_coalescing: if set disables RX IRQ after first message and uses FLAG
- *                  IRQ to read several messages in row (using FIFO full or
- *                  FIFO half-full status bits. Starts timer to re-enable normal
- *                  RX IRQ if not enough messages in FIFO to trigger FLAG IRQ.
- *                  value is message count.
+ * @rx_thread: receiver thread
  */
 struct hi3593_channel_priv {
 	struct arinc429_priv	arinc429;	/* must be the first member */
@@ -285,12 +291,15 @@ struct hi3593_channel_priv {
 	enum channel_type	type;
 	enum channel_rate	rate;
 
-	struct work_struct	work;
-
-	struct timer_list	irq_enable_timer;
-
-	atomic_t		fifo_full;
-	int			irq_coalescing;
+	union {
+		/* TX specific members */
+		struct {
+			struct work_struct	work;
+			atomic_t		fifo_full;
+		};
+		/* RX specific members */
+		struct hi3593_rx_thread	rx_thread;
+	};
 };
 
 /* HoltIC HI-3953 chip specific private data
@@ -308,7 +317,6 @@ struct hi3593_channel_priv {
                      label bitmap from 0377 to 0000
  * @hw_reset: external master reset GPIO pin
  * @rx_int: RxINT interrupt GPIO pin
- * @rx_flag: RxFLAG interrupt GPIO pin
  * @tx_full: TFULL interrupt GPIO pin
  * @tx_empty: TFEMPTY interrupt GPIO pin
  * @freq: ARINC429 bus reference clock
@@ -327,7 +335,6 @@ struct hi3593_priv {
 	DECLARE_BITMAP(			r2_label_filter, NUM_LABELS);
 	int				hw_reset;
 	int				rx_int[NUM_RECEIVERS];
-	int				rx_flag[NUM_RECEIVERS];
 	int				tx_full;
 	int				tx_empty;
 	u32				freq;
@@ -484,8 +491,6 @@ static inline void hi3593_register_debugfs(struct hi3593_priv *adev) {}
 static inline void hi3593_unregister_debugfs(struct hi3593_priv *adev) {}
 #endif
 
-static void hi3593_receive(struct hi3593_channel_priv *chan);
-
 static inline bool hi3593_is_transmitter(enum channel_type channel_type)
 {
 	return channel_type == TRANSMITTER;
@@ -494,6 +499,25 @@ static inline bool hi3593_is_transmitter(enum channel_type channel_type)
 static inline bool hi3593_is_receiver(enum channel_type channel_type)
 {
 	return !(hi3593_is_transmitter(channel_type));
+}
+
+static inline int hi3593_is_receive_fifo_empty(
+			struct hi3593_channel_priv *chan)
+{
+	u8 status;
+	int ret;
+
+	ret = spi_write_then_read(chan->adev->spi,
+			&read_sr_cmds[chan->type], 1, &status, 1);
+	if (ret) {
+		netdev_err(chan->ndev, "unable to get Receiver status\n");
+		return ret;
+	}
+
+	if (status & RECEIVER_STATUS_FIFO_EMPTY)
+		return 1;
+
+	return 0;
 }
 
 static inline int __hi3593_write_ctrl_reg(struct hi3593_priv *adev,
@@ -584,19 +608,6 @@ static void hi3593_tx_work_handler(struct work_struct *ws)
 		netif_wake_queue(chan->ndev);
 }
 
-
-static void hi3593_rx_work_handler(struct work_struct *ws)
-{
-	struct hi3593_channel_priv *chan = container_of(ws,
-			struct hi3593_channel_priv, work);
-
-	netdev_vdbg(chan->ndev, "%s: enter\n", __func__);
-
-	hi3593_receive(chan);
-
-	enable_irq(gpio_to_irq(chan->adev->rx_int[chan->type]));
-}
-
 static int hi3593_master_reset(struct hi3593_priv *adev)
 {
 	int ret = 0;
@@ -646,31 +657,6 @@ static int hi3593_set_clock(struct spi_device *spi, u32 desired_freq)
 	return 0;
 }
 
-static inline void hi3593_restart_timer(struct hi3593_channel_priv *chan)
-{
-	u32 wait_jiffies;
-
-	netdev_vdbg(chan->ndev, "%s: enter\n", __func__);
-
-	if (chan->rate == RATE_HIGH)
-		wait_jiffies = usecs_to_jiffies(
-			chan->irq_coalescing * HIGH_RATE_MESSAGE_TIME);
-	else
-		wait_jiffies = usecs_to_jiffies(
-			chan->irq_coalescing * LOW_RATE_MESSAGE_TIME);
-
-	mod_timer(&chan->irq_enable_timer, jiffies + wait_jiffies);
-}
-
-static void hi3593_flag_irq_timeout(unsigned long arg)
-{
-	struct hi3593_channel_priv *chan = (struct hi3593_channel_priv *)arg;
-
-	netdev_vdbg(chan->ndev, "%s: enter\n", __func__);
-
-	schedule_work(&chan->work);
-}
-
 /* Reads single message from RX FIFO, make sure that FIFO contains
  * a message. HW does not report error on try to read empty FIFO.
  */
@@ -713,22 +699,27 @@ static void hi3593_rx_buf(struct hi3593_channel_priv *chan)
 		af->label, af->data[0], af->data[1], af->data[2]);
 }
 
-static void hi3593_receive(struct hi3593_channel_priv *chan)
+/* Reads messages from RX FIFO until it is empty or thread exit requested
+ *
+ * returns 0 if nothing could be read from FIFO,
+ * negative value in case of error or thread exit
+ */
+static int hi3593_receive(struct hi3593_channel_priv *chan)
 {
-	u8 msg_count = 0;
+	int msg_count = 0;
 	u8 status;
-	u8 i;
 	int ret;
 
+start:
 	ret = spi_write_then_read(chan->adev->spi,
 			&read_sr_cmds[chan->type], 1, &status, 1);
 	if (ret) {
 		netdev_err(chan->ndev, "unable to get Receiver status\n");
-		return;
+		return ret;
 	}
 
 	if (status & RECEIVER_STATUS_FIFO_EMPTY)
-		return;
+		return 0;
 
 	/* try to read as many messages as possible without status bit check */
 	if (status & RECEIVER_STATUS_FIFO_FULL) {
@@ -738,28 +729,23 @@ static void hi3593_receive(struct hi3593_channel_priv *chan)
 	}
 
 	if (likely(msg_count)) {
-		for (i = 0; i < msg_count; i++)
+		u8 i;
+		for (i = 0; i < msg_count; i++) {
 			hi3593_rx_buf(chan);
-		return;
+			if (unlikely(atomic_read(&chan->rx_thread.thread_done)))
+				return -EPIPE;
+		}
+		goto start;
 	}
 
 	/* there is no indication of how many messages are in RX FIFO.
-	 * It is known that at least one is there and max is half FIFO size - 1 */
-	for (i = 0; i < RX_FIFO_SIZE / 2 - 1; i++) {
-		hi3593_rx_buf(chan);
+	 * It is known that at least one is there */
+	hi3593_rx_buf(chan);
+	if (unlikely(atomic_read(&chan->rx_thread.thread_done)))
+		return -EPIPE;
 
-		ret = spi_write_then_read(chan->adev->spi,
-				&read_sr_cmds[chan->type], 1,
-				&status, 1);
-		if (ret) {
-			netdev_err(chan->ndev,
-				"unable to get Receiver status\n");
-			return;
-		}
-
-		if (status & RECEIVER_STATUS_FIFO_EMPTY)
-			return;
-	}
+	/* start from the beginning, check status and read more if available */
+	goto start;
 }
 
 static irqreturn_t hi3593_rx_irq(int irq, void *dev_id)
@@ -770,34 +756,9 @@ static irqreturn_t hi3593_rx_irq(int irq, void *dev_id)
 
 	disable_irq_nosync(irq);
 
-	if (chan->irq_coalescing)
-		del_timer(&chan->irq_enable_timer);
+	atomic_set(&chan->rx_thread.rx, 1);
 
-	hi3593_receive(chan);
-
-	if (chan->irq_coalescing)
-		hi3593_restart_timer(chan);
-	else
-		enable_irq(irq);
-
-	return IRQ_HANDLED;
-}
-
-static irqreturn_t hi3593_rx_flag_irq(int irq, void *dev_id)
-{
-	struct hi3593_channel_priv *chan = dev_id;
-
-	netdev_vdbg(chan->ndev, "%s: enter\n", __func__);
-
-	disable_irq_nosync(irq);
-
-	del_timer(&chan->irq_enable_timer);
-
-	hi3593_receive(chan);
-
-	hi3593_restart_timer(chan);
-
-	enable_irq(irq);
+	wake_up_interruptible(&chan->rx_thread.wait);
 
 	return IRQ_HANDLED;
 }
@@ -910,6 +871,55 @@ static int hi3593_channel_default_config(
 	return __hi3593_write_ctrl_reg(chan->adev, chan->type, val);
 }
 
+static int hi3593_rx_thread_func(void *data)
+{
+	struct hi3593_channel_priv *chan = (struct hi3593_channel_priv*)data;
+
+	while (true) {
+		wait_event_interruptible(chan->rx_thread.wait,
+			atomic_read(&chan->rx_thread.rx) ||
+			atomic_read(&chan->rx_thread.thread_done));
+
+		if (unlikely(atomic_read(&chan->rx_thread.thread_done)))
+			break;
+
+		if (unlikely(hi3593_receive(chan) < 0))
+			break;
+
+		atomic_set(&chan->rx_thread.rx, 0);
+		enable_irq(gpio_to_irq(chan->adev->rx_int[chan->type]));
+	}
+
+	complete_and_exit(&chan->rx_thread.completion, 0);
+	return 0;
+}
+
+/* prepare and start dedicated RX thread */
+static int hi3593_init_rx_thread(struct hi3593_channel_priv *chan)
+{
+	atomic_set(&chan->rx_thread.thread_done, 0);
+	atomic_set(&chan->rx_thread.rx, 0);
+
+	init_waitqueue_head(&chan->rx_thread.wait);
+	init_completion(&chan->rx_thread.completion);
+
+	chan->rx_thread.task = kthread_run(hi3593_rx_thread_func,
+					chan, "hi3593rx-%d", chan->type);
+	if (IS_ERR(chan->rx_thread.task))
+		return (int)PTR_ERR(chan->rx_thread.task);
+
+	return 0;
+}
+
+static int hi3593_kill_thread(struct hi3593_channel_priv *chan)
+{
+	atomic_set(&chan->rx_thread.thread_done, 1);
+	wake_up_interruptible(&chan->rx_thread.wait);
+
+	wait_for_completion(&chan->rx_thread.completion);
+	return kthread_stop(chan->rx_thread.task);
+}
+
 static int hi3593_open(struct net_device *ndev)
 {
 	struct hi3593_channel_priv *chan = netdev_priv(ndev);
@@ -938,18 +948,18 @@ static int hi3593_open(struct net_device *ndev)
 	switch (chan->type) {
 	case RECEIVER_1:
 	case RECEIVER_2:
-		if (!gpio_is_valid(adev->rx_int[chan->type]) ||
-			!gpio_is_valid(adev->rx_flag[chan->type])) {
+		if (!gpio_is_valid(adev->rx_int[chan->type])) {
 			netdev_err(ndev,
-				"GPIO lines for receiver %d IRQs are invalid\n",
+				"GPIO line for receiver %d IRQ is invalid\n",
 				(int)chan->type + 1);
 			ret = -EINVAL;
 			goto err_unlock;
 		}
 
-		ret = devm_request_threaded_irq(dev,
+		ret = hi3593_init_rx_thread(chan);
+
+		ret = devm_request_irq(dev,
 			gpio_to_irq(adev->rx_int[chan->type]),
-			NULL,
 			hi3593_rx_irq,
 			IRQF_ONESHOT | IRQF_TRIGGER_FALLING,
 			adev->labels[chan->type],
@@ -958,30 +968,11 @@ static int hi3593_open(struct net_device *ndev)
 			netdev_err(ndev,
 				"failed to acquire receiver %d interrupt\n",
 				(int)chan->type + 1);
+
+			hi3593_kill_thread(chan);
+
 			goto err_unlock;
 		}
-
-		ret = devm_request_threaded_irq(dev,
-			gpio_to_irq(adev->rx_flag[chan->type]),
-			NULL,
-			hi3593_rx_flag_irq,
-			IRQF_ONESHOT | IRQF_TRIGGER_HIGH,
-			adev->labels[chan->type],
-			chan);
-		if (ret) {
-			netdev_err(ndev,
-				"failed to acquire receiver %d FLAG interrupt\n",
-				(int)chan->type + 1);
-			goto err_unlock;
-		}
-
-		chan->irq_coalescing = DEFAULT_IRQ_COALESCING;
-
-		init_timer(&chan->irq_enable_timer);
-		chan->irq_enable_timer.data = (unsigned long)chan;
-		chan->irq_enable_timer.function = hi3593_flag_irq_timeout;
-
-		INIT_WORK(&chan->work, hi3593_rx_work_handler);
 
 		break;
 
@@ -1057,13 +1048,10 @@ static int hi3593_close(struct net_device *ndev)
 
 	switch (chan->type) {
 	case RECEIVER_1:
-		case RECEIVER_2:
-		flush_work(&chan->work);
+	case RECEIVER_2:
+		hi3593_kill_thread(chan);
 
 		devm_free_irq(dev, gpio_to_irq(adev->rx_int[chan->type]), chan);
-		devm_free_irq(dev, gpio_to_irq(adev->rx_flag[chan->type]), chan);
-
-		del_timer_sync(&chan->irq_enable_timer);
 
 		break;
 
@@ -1414,99 +1402,6 @@ hi3593_channel_type_get(struct device *d,
 static DEVICE_ATTR(channel_type, S_IRUSR,
 	hi3593_channel_type_get, NULL);
 
-static ssize_t
-hi3593_rx_irq_coalescing_get(struct device *d,
-		struct device_attribute *attr, char *buf)
-{
-	struct net_device *dev = to_net_dev(d);
-	struct hi3593_channel_priv *chan = netdev_priv(dev);
-
-	if (hi3593_is_transmitter(chan->type))
-		return sprintf(buf, "N/A\n");
-
-	if (chan->irq_coalescing)
-		return sprintf(buf, "RX IRQ coalescing: %d message(s)\n",
-				chan->irq_coalescing);
-	else
-		return sprintf(buf, "RX IRQ coalescing disabled\n");
-}
-
-static ssize_t
-hi3593_rx_irq_coalescing_set(struct device *d,
-		struct device_attribute *attr,
-		const char *buf, size_t count)
-{
-	struct net_device *dev = to_net_dev(d);
-	struct hi3593_channel_priv *chan = netdev_priv(dev);
-	struct hi3593_priv *adev = chan->adev;
-	unsigned long long val;
-	u8 mask_bits[NUM_RECEIVERS] = {R1_FLAG_MASK, R2_FLAG_MASK};
-	u8 fifo_full_bits[NUM_RECEIVERS] =
-			{R1_FLAG_FIFO_FULL, R2_FLAG_FIFO_FULL};
-	u8 fifo_half_full_bits[NUM_RECEIVERS] =
-			{R1_FLAG_FIFO_HALF_FULL, R2_FLAG_FIFO_HALF_FULL};
-	u8 tx_buf[2] = {CMD_WRITE_FLAG, 0};
-	int ret = -EINVAL;
-
-	if (hi3593_is_transmitter(chan->type))
-		return ret;
-
-	ret = kstrtoull(buf, 0, &val);
-	if (ret)
-		return ret;
-
-	/* clamp to max RX FIFO size */
-	if (val > RX_FIFO_SIZE)
-		val = RX_FIFO_SIZE;
-
-	if (chan->irq_coalescing == val)
-		return count;
-
-	/* if coalescing is turned off or requested less than half of FIFO size,
-	 * disable FLAG IRQ and use only RX IRQ (with timer if N > 0) */
-	if (val < RX_FIFO_SIZE / 2) {
-		if (chan->irq_coalescing >= RX_FIFO_SIZE / 2) {
-			disable_irq(gpio_to_irq(adev->rx_flag[chan->type]));
-			dev_dbg(&adev->spi->dev,
-				"disabled irq: %d\n",
-				gpio_to_irq(adev->rx_flag[chan->type]));
-		}
-		goto exit;
-	}
-
-	if (val == RX_FIFO_SIZE) {
-		/* if max size requested use FIFO full FLAG IRQ trigger */
-		tx_buf[1] = adev->flag_iar & ~mask_bits[chan->type];
-		tx_buf[1] |= fifo_full_bits[chan->type];
-	} else {
-		/* otherwise use FIFO half-full FLAG IRQ trigger */
-		tx_buf[1] = adev->flag_iar & ~mask_bits[chan->type];
-		tx_buf[1] |= fifo_half_full_bits[chan->type];
-	}
-
-	/* write receiver flags and interrupt settings into HW */
-	ret = spi_write(adev->spi, tx_buf, sizeof(tx_buf));
-	if (ret)
-		return ret;
-
-	adev->flag_iar = tx_buf[1];
-
-	/* enable FLAG IRQ if it was disabled earlier */
-	if (chan->irq_coalescing < RX_FIFO_SIZE / 2) {
-		enable_irq(gpio_to_irq(adev->rx_flag[chan->type]));
-		dev_dbg(&adev->spi->dev,
-			"enabled irq: %d\n",
-			gpio_to_irq(adev->rx_flag[chan->type]));
-	}
-exit:
-	chan->irq_coalescing = val;
-
-	return count;
-}
-
-static DEVICE_ATTR(rx_irq_coalescing, S_IRUGO | S_IWUSR,
-	hi3593_rx_irq_coalescing_get, hi3593_rx_irq_coalescing_set);
-
 static struct attribute *hi3593_sysfs_entries[] = {
 	&dev_attr_flip_label_bits.attr,
 	&dev_attr_rate.attr,
@@ -1515,7 +1410,6 @@ static struct attribute *hi3593_sysfs_entries[] = {
 	&dev_attr_label_filter_bitmap.attr,
 	&dev_attr_tx_odd_even.attr,
 	&dev_attr_channel_type.attr,
-	&dev_attr_rx_irq_coalescing.attr,
 	NULL
 };
 
@@ -1591,7 +1485,6 @@ static void hi3593_free_channel(struct hi3593_channel_priv *chan)
  *   rx-chan@<idx> {
  *     label - interface name to assign
  *     rx_int-gpio - Receiver <idx> interrupt (RxINT)
- *     rx_flag-gpio - Receiver <idx> FLAG interrupt (RxFLAG)
  *   }
  *   tx-chan@<idx> {
  *     label - interface name to assign
@@ -1647,14 +1540,6 @@ static int hi3593_probe_dt(struct hi3593_priv *adev)
 		return -EINVAL;
 	}
 
-	adev->rx_flag[RECEIVER_1] = of_get_named_gpio(chan, "flag-gpio", 0);
-	if (!gpio_is_valid(adev->rx_flag[RECEIVER_1]) ||
-		devm_gpio_request_one(dev, adev->rx_flag[RECEIVER_1],
-				GPIOF_IN, "HI-3593 Receiver 1 FLAG pin")) {
-		dev_err(dev, "Failed to get RX FLAG IRQ GPIO\n");
-		return -EINVAL;
-	}
-
 	/* Receiver 2 */
 	chan = of_get_child_by_name(node, "rx2-chan");
 	if (!chan) {
@@ -1669,14 +1554,6 @@ static int hi3593_probe_dt(struct hi3593_priv *adev)
 		devm_gpio_request_one(dev, adev->rx_int[RECEIVER_2],
 				GPIOF_IN, "HI-3593 Receiver 2 INT pin")) {
 		dev_err(dev, "Failed to get RX IRQ GPIO\n");
-		return -EINVAL;
-	}
-
-	adev->rx_flag[RECEIVER_2] = of_get_named_gpio(chan, "flag-gpio", 0);
-	if (!gpio_is_valid(adev->rx_flag[RECEIVER_2]) ||
-		devm_gpio_request_one(dev, adev->rx_flag[RECEIVER_2],
-				GPIOF_IN, "HI-3593 Receiver 2 FLAG pin")) {
-		dev_err(dev, "Failed to get RX FLAG IRQ GPIO\n");
 		return -EINVAL;
 	}
 

@@ -350,12 +350,10 @@
 		rx1-chan {
 			  label = "arinc429rx1";
 			  int-gpio = <&gpio3 13 GPIO_ACTIVE_HIGH>;
-			  flag-gpio = <&gpio3 15 GPIO_ACTIVE_HIGH>;
 		};
 		rx2-chan {
 			  label = "arinc429rx2";
 			  int-gpio = <&gpio3 14 GPIO_ACTIVE_HIGH>;
-			  flag-gpio = <&gpio3 1 GPIO_ACTIVE_HIGH>;
 		};
 		tx-chan {
 			  label = "arinc429tx1";
