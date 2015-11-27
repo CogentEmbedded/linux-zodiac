@@ -911,13 +911,12 @@ static int hi3593_init_rx_thread(struct hi3593_channel_priv *chan)
 	return 0;
 }
 
-static int hi3593_kill_thread(struct hi3593_channel_priv *chan)
+static void hi3593_stop_thread(struct hi3593_channel_priv *chan)
 {
 	atomic_set(&chan->rx_thread.thread_done, 1);
 	wake_up_interruptible(&chan->rx_thread.wait);
 
 	wait_for_completion(&chan->rx_thread.completion);
-	return kthread_stop(chan->rx_thread.task);
 }
 
 static int hi3593_open(struct net_device *ndev)
@@ -969,7 +968,7 @@ static int hi3593_open(struct net_device *ndev)
 				"failed to acquire receiver %d interrupt\n",
 				(int)chan->type + 1);
 
-			hi3593_kill_thread(chan);
+			hi3593_stop_thread(chan);
 
 			goto err_unlock;
 		}
@@ -1049,7 +1048,7 @@ static int hi3593_close(struct net_device *ndev)
 	switch (chan->type) {
 	case RECEIVER_1:
 	case RECEIVER_2:
-		hi3593_kill_thread(chan);
+		hi3593_stop_thread(chan);
 
 		devm_free_irq(dev, gpio_to_irq(adev->rx_int[chan->type]), chan);
 
