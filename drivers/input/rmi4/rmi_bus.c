@@ -302,9 +302,9 @@ int rmi_of_property_read_u16(struct device *dev, u16 *result,
 				const char *prop, bool optional)
 {
 	int retval;
-	u16 val = 0;
+	u32 val = 0;
 
-	retval = of_property_read_u16(dev->of_node, prop, &val);
+	retval = of_property_read_u32(dev->of_node, prop, &val);
 	if (retval && (!optional && retval == -EINVAL)) {
 		dev_err(dev, "Failed to get %s value: %d\n",
 			prop, retval);
@@ -320,9 +320,9 @@ int rmi_of_property_read_u8(struct device *dev, u8 *result,
 				const char *prop, bool optional)
 {
 	int retval;
-	u8 val = 0;
+	u32 val = 0;
 
-	retval = of_property_read_u8(dev->of_node, prop, &val);
+	retval = of_property_read_u32(dev->of_node, prop, &val);
 	if (retval && (!optional && retval == -EINVAL)) {
 		dev_err(dev, "Failed to get %s value: %d\n",
 			prop, retval);
