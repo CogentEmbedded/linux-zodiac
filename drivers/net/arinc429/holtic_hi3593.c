@@ -706,11 +706,13 @@ static void hi3593_rx_buf(struct hi3593_channel_priv *chan)
  */
 static int hi3593_receive(struct hi3593_channel_priv *chan)
 {
-	int msg_count = 0;
+	int msg_count;
 	u8 status;
 	int ret;
 
 start:
+	msg_count = 0;
+
 	ret = spi_write_then_read(chan->adev->spi,
 			&read_sr_cmds[chan->type], 1, &status, 1);
 	if (ret) {
