@@ -266,7 +266,7 @@ int rmi_2d_sensor_of_probe(struct device *dev,
 
 	retval = rmi_of_property_read_u16(dev,
 			&pdata->axis_align.offset_y,
-			"syna,offset_y", 1);
+			"syna,offset-y", 1);
 	if (retval)
 		return retval;
 

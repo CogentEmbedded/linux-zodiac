@@ -1180,9 +1180,6 @@ static int rmi_f11_initialize(struct rmi_function *fn)
 	if (rc < 0)
 		return rc;
 
-	if (sensor->axis_align.swap_axes)
-		swap(max_x_pos, max_y_pos);
-
 	sensor->max_x = max_x_pos;
 	sensor->max_y = max_y_pos;
 
