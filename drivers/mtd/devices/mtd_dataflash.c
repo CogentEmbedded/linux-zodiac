@@ -691,6 +691,7 @@ struct flash_info {
 	 * the manufacturer id, then a two byte device id.
 	 */
 	uint32_t	jedec_id;
+	uint32_t	jedec_ext;
 
 	/* The size listed here is what works with OP_ERASE_PAGE. */
 	unsigned	nr_pages;
@@ -713,36 +714,39 @@ static struct flash_info dataflash_data[] = {
 	 * These newer chips also support 128-byte security registers (with
 	 * 64 bytes one-time-programmable) and software write-protection.
 	 */
-	{ "AT45DB011B",  0x1f2200, 512, 264, 9, SUP_POW2PS},
-	{ "at45db011d",  0x1f2200, 512, 256, 8, SUP_POW2PS | IS_POW2PS},
+	{ "AT45DB011B",  0x1f2200, 0x0000, 512, 264, 9, SUP_POW2PS},
+	{ "at45db011d",  0x1f2200, 0x0000, 512, 256, 8, SUP_POW2PS | IS_POW2PS},
 
-	{ "AT45DB021B",  0x1f2300, 1024, 264, 9, SUP_POW2PS},
-	{ "at45db021d",  0x1f2300, 1024, 256, 8, SUP_POW2PS | IS_POW2PS},
+	{ "AT45DB021B",  0x1f2300, 0x0000, 1024, 264, 9, SUP_POW2PS},
+	{ "at45db021d",  0x1f2300, 0x0000, 1024, 256, 8, SUP_POW2PS | IS_POW2PS},
 
-	{ "AT45DB041x",  0x1f2400, 2048, 264, 9, SUP_POW2PS},
-	{ "at45db041d",  0x1f2400, 2048, 256, 8, SUP_POW2PS | IS_POW2PS},
+	{ "AT45DB041x",  0x1f2400, 0x0000, 2048, 264, 9, SUP_POW2PS},
+	{ "at45db041d",  0x1f2400, 0x0000, 2048, 256, 8, SUP_POW2PS | IS_POW2PS},
 
-	{ "AT45DB081B",  0x1f2500, 4096, 264, 9, SUP_POW2PS},
-	{ "at45db081d",  0x1f2500, 4096, 256, 8, SUP_POW2PS | IS_POW2PS},
+	{ "AT45DB081B",  0x1f2500, 0x0000, 4096, 264, 9, SUP_POW2PS},
+	{ "at45db081d",  0x1f2500, 0x0000, 4096, 256, 8, SUP_POW2PS | IS_POW2PS},
 
-	{ "AT45DB161x",  0x1f2600, 4096, 528, 10, SUP_POW2PS},
-	{ "at45db161d",  0x1f2600, 4096, 512, 9, SUP_POW2PS | IS_POW2PS},
+	{ "AT45DB161x",  0x1f2600, 0x0000, 4096, 528, 10, SUP_POW2PS},
+	{ "at45db161d",  0x1f2600, 0x0000, 4096, 512, 9, SUP_POW2PS | IS_POW2PS},
 
-	{ "AT45DB321x",  0x1f2700, 8192, 528, 10, 0},		/* rev C */
+	{ "AT45DB321x",  0x1f2700, 0x0000, 8192, 528, 10, 0},		/* rev C */
 
-	{ "AT45DB321x",  0x1f2701, 8192, 528, 10, SUP_POW2PS},
-	{ "at45db321d",  0x1f2701, 8192, 512, 9, SUP_POW2PS | IS_POW2PS},
+	{ "AT45DB321x",  0x1f2701, 0x0000, 8192, 528, 10, SUP_POW2PS},
+	{ "at45db321d",  0x1f2701, 0x0000, 8192, 512, 9, SUP_POW2PS | IS_POW2PS},
 
-	{ "AT45DB642x",  0x1f2800, 8192, 1056, 11, SUP_POW2PS},
-	{ "at45db642d",  0x1f2800, 8192, 1024, 10, SUP_POW2PS | IS_POW2PS},
+	{ "AT45DB642x",  0x1f2800, 0x0000, 8192, 1056, 11, SUP_POW2PS},
+	{ "at45db642d",  0x1f2800, 0x0000, 8192, 1024, 10, SUP_POW2PS | IS_POW2PS},
+
+	{ "at45db642e",  0x1f2800, 0x0100, 32768, 256, 8, SUP_POW2PS | IS_POW2PS},
 };
 
 static struct flash_info *jedec_probe(struct spi_device *spi)
 {
 	int			tmp;
 	uint8_t			code = OP_READ_ID;
-	uint8_t			id[3];
+	uint8_t			id[5];
 	uint32_t		jedec;
+	uint32_t		jedec_ext;
 	struct flash_info	*info;
 	int status;
 
@@ -754,7 +758,7 @@ static struct flash_info *jedec_probe(struct spi_device *spi)
 	 * That's not an error; only rev C and newer chips handle it, and
 	 * only Atmel sells these chips.
 	 */
-	tmp = spi_write_then_read(spi, &code, 1, id, 3);
+	tmp = spi_write_then_read(spi, &code, 1, id, 5);
 	if (tmp < 0) {
 		pr_debug("%s: error %d reading JEDEC ID\n",
 			dev_name(&spi->dev), tmp);
@@ -769,10 +773,13 @@ static struct flash_info *jedec_probe(struct spi_device *spi)
 	jedec = jedec << 8;
 	jedec |= id[2];
 
+	jedec_ext = (id[3] << 8) | id[4];
+
 	for (tmp = 0, info = dataflash_data;
 			tmp < ARRAY_SIZE(dataflash_data);
 			tmp++, info++) {
-		if (info->jedec_id == jedec) {
+		if ((info->jedec_id == jedec) &&
+			(info->jedec_ext == jedec_ext)) {
 			pr_debug("%s: OTP, sector protect%s\n",
 				dev_name(&spi->dev),
 				(info->flags & SUP_POW2PS)
@@ -802,7 +809,7 @@ static struct flash_info *jedec_probe(struct spi_device *spi)
 	 * size (it might be binary) even when we can tell which density
 	 * class is involved (legacy chip id scheme).
 	 */
-	dev_warn(&spi->dev, "JEDEC id %06x not handled\n", jedec);
+	dev_warn(&spi->dev, "JEDEC id %06x:%04x not handled\n", jedec, jedec_ext);
 	return ERR_PTR(-ENODEV);
 }
 
