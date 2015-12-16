@@ -213,6 +213,9 @@ static void of_gpiochip_scan_gpios(struct gpio_chip *chip)
 		if (IS_ERR(desc))
 			continue;
 
+		if (name)
+			desc->name = name;
+
 		if (!dflags) {
 			pr_warn("GPIO line %d (%s): no hogging state specified, bailing out\n",
 				desc_to_gpio(desc), np->name);
