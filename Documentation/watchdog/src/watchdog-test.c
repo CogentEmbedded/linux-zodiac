@@ -43,7 +43,7 @@ int main(int argc, char *argv[])
     int flags;
     unsigned int ping_rate = 1;
 
-    fd = open("/dev/watchdog", O_WRONLY);
+    fd = open("/dev/watchdog1", O_WRONLY);
 
     if (fd == -1) {
 	fprintf(stderr, "Watchdog device not enabled.\n");
