@@ -34,6 +34,8 @@
  * If such a child is present, the tty device will not be registered
  * until the slave device is fully probed and initialized.
  */
+#define DEBUG
+
 #include <linux/types.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -48,6 +50,8 @@
 
 static int uart_slave_match(struct device *dev, struct device_driver *drv)
 {
+	pr_debug("%s: enter\n", __func__);
+
 	return of_driver_match_device(dev, drv);
 }
 
@@ -55,6 +59,8 @@ static void uart_slave_release(struct device *dev)
 {
 	struct uart_slave *slave =
 		container_of(dev, struct uart_slave, dev);
+
+	pr_debug("%s: enter\n", __func__);
 
 	if (!slave->finalized) {
 		put_device(slave->tty_dev);
@@ -69,12 +75,47 @@ struct bus_type uart_slave_bus_type = {
 	.match		= uart_slave_match,
 };
 
+static int uart_slave_tty_dev_match(struct device *dev, void *tty)
+{
+	struct uart_slave *slave =
+		container_of(dev, struct uart_slave, dev);
+
+	return slave->tty_dev == tty;
+}
+
+static int uart_slave_add_dev(struct device *class_dev,
+		struct class_interface *class_intf)
+{
+	struct uart_slave *slave;
+	struct device *dev;
+	int ret = 0;
+
+	dev = bus_find_device(&uart_slave_bus_type, NULL,
+			class_dev, uart_slave_tty_dev_match);
+	if (!dev)
+		return 0;
+
+	slave = container_of(dev, struct uart_slave, dev);
+	if (slave->device_added)
+		ret = slave->device_added(slave);
+
+	put_device(dev);
+
+	return ret;
+}
+
+static struct class_interface uart_slave_interface = {
+	.add_dev = &uart_slave_add_dev,
+};
+
 int uart_slave_register(struct device *parent,
 			struct device *tty, struct tty_driver *drv)
 {
 	struct device_node *node, *found = NULL;
 	struct uart_slave *slave;
 	int retval;
+
+	pr_debug("%s: enter\n", __func__);
 
 	if (!parent || !parent->of_node)
 		return -ENODEV;
@@ -113,6 +154,9 @@ EXPORT_SYMBOL(uart_slave_register);
 void uart_slave_activate(struct tty_struct *tty)
 {
 	struct device *parent = NULL;
+
+	pr_debug("%s: enter\n", __func__);
+
 	if (tty->dev)
 		parent = tty->dev->parent;
 	if (parent &&
@@ -120,6 +164,9 @@ void uart_slave_activate(struct tty_struct *tty)
 	{
 		struct uart_slave *dev =
 			container_of(parent, struct uart_slave, dev);
+
+		pr_debug("%s: slave activated\n", __func__);
+
 		tty->ops = &dev->ops;
 	}
 }
@@ -128,6 +175,9 @@ EXPORT_SYMBOL(uart_slave_activate);
 int uart_slave_add_tty(struct uart_slave *slave)
 {
 	int retval;
+
+	pr_debug("%s: enter\n", __func__);
+
 	if (slave->finalized)
 		return -EBUSY;
 	slave->tty_dev->parent = &slave->dev;
@@ -146,6 +196,8 @@ EXPORT_SYMBOL(uart_slave_add_tty);
 
 int uart_slave_driver_register(struct device_driver *drv)
 {
+	pr_debug("%s: enter\n", __func__);
+
 	drv->bus = &uart_slave_bus_type;
 	return driver_register(drv);
 }
@@ -153,11 +205,28 @@ EXPORT_SYMBOL(uart_slave_driver_register);
 
 static int __init uart_slave_init(void)
 {
-	return bus_register(&uart_slave_bus_type);
+	int ret;
+	pr_debug("%s: enter\n", __func__);
+
+	ret = bus_register(&uart_slave_bus_type);
+	if (ret)
+		goto exit;
+
+	uart_slave_interface.class = tty_class;
+	ret = class_interface_register(&uart_slave_interface);
+	if (ret) {
+		bus_unregister(&uart_slave_bus_type);
+		pr_err("%s: unable to register class interface\n", __func__);
+	}
+
+exit:
+	return ret;
 }
 
 static void __exit uart_slave_exit(void)
 {
+	pr_debug("%s: enter\n", __func__);
+
 	bus_unregister(&uart_slave_bus_type);
 }
 

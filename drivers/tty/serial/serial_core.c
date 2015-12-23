@@ -20,6 +20,7 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
+#define DEBUG
 #include <linux/module.h>
 #include <linux/tty.h>
 #include <linux/tty_flip.h>
@@ -1393,7 +1394,8 @@ static void uart_close(struct tty_struct *tty, struct file *filp)
 	uport = state->uart_port;
 	port = &state->port;
 
-	pr_debug("uart_close(%d) called\n", uport ? uport->line : -1);
+    if (uport && uport->line)
+        pr_debug("uart_close(%d) called\n", uport ? uport->line : -1);
 
 	if (!port->count || tty_port_close_start(port, tty, filp) == 0)
 		return;
@@ -1484,8 +1486,9 @@ static void uart_wait_until_sent(struct tty_struct *tty, int timeout)
 
 	expire = jiffies + timeout;
 
-	pr_debug("uart_wait_until_sent(%d), jiffies=%lu, expire=%lu...\n",
-		port->line, jiffies, expire);
+    if (port->line)
+        pr_debug("uart_wait_until_sent(%d), jiffies=%lu, expire=%lu...\n",
+                 port->line, jiffies, expire);
 
 	/*
 	 * Check whether the transmitter is empty every 'char_time'.
@@ -1598,7 +1601,8 @@ static int uart_open(struct tty_struct *tty, struct file *filp)
 	struct uart_state *state = drv->state + line;
 	struct tty_port *port = &state->port;
 
-	pr_debug("uart_open(%d) called\n", line);
+	if (line)
+		pr_debug("uart_open(%d) called\n", line);
 
 	spin_lock_irq(&port->lock);
 	++port->count;
