@@ -14,6 +14,7 @@ enum pic_state {
 enum pic_hw_id {
 	PIC_HW_ID_NIU,
 	PIC_HW_ID_MEZZ,
+	PIC_HW_ID_ESB,
 	PIC_HW_ID_RDU
 };
 

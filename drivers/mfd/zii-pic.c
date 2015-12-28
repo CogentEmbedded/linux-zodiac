@@ -57,6 +57,7 @@ union zii_pic_cmd_data_set_wdt {
 const static struct of_device_id zii_pic_mfd_dt_ids[] = {
 	{ .compatible = "zii,pic-niu",  .data = (const void *)PIC_HW_ID_NIU},
 	{ .compatible = "zii,pic-mezz", .data = (const void *)PIC_HW_ID_MEZZ},
+	{ .compatible = "zii,pic-esb", .data = (const void *)PIC_HW_ID_ESB},
 	{ .compatible = "zii,pic-rdu",  .data = (const void *)PIC_HW_ID_RDU},
 	{}
 };
@@ -170,7 +171,7 @@ static int zii_pic_mcu_cmd_no_response(struct zii_pic_mfd *adev,
 	return adev->mcu_ops.cmd_no_response(&mcu_cmd);
 }
 
-void zii_pic_get_reset_reason(struct zii_pic_mfd *adev)
+static void zii_pic_get_reset_reason(struct zii_pic_mfd *adev)
 {
 	int ret;
 
@@ -183,6 +184,26 @@ void zii_pic_get_reset_reason(struct zii_pic_mfd *adev)
 	}
 }
 
+static int zii_pic_get_status(struct zii_pic_mfd *adev)
+{
+	int ret;
+
+	switch (adev->hw_id) {
+	case PIC_HW_ID_NIU:
+		ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_GET_STATUS, NULL, 0);
+		break;
+
+	case PIC_HW_ID_MEZZ:
+	case PIC_HW_ID_ESB:
+	case PIC_HW_ID_RDU:
+	default:
+		/* TODO: read firmware and bootloader versions */
+		ret = 0;
+		break;
+	}
+
+	return ret;
+}
 static int zii_pic_configure(struct zii_pic_mfd *adev)
 {
 	struct ktermios ktermios;
@@ -222,6 +243,12 @@ static int zii_pic_configure(struct zii_pic_mfd *adev)
 		adev->checksum_size = 2;
 		break;
 
+	case PIC_HW_ID_ESB:
+		checksum_type = N_MCU_CHECKSUM_CRC16;
+		adev->cmd = zii_pic_niu_cmds;
+		adev->checksum_size = 2;
+		break;
+
 	case PIC_HW_ID_RDU:
 		checksum_type = N_MCU_CHECKSUM_8B2C;
 		adev->cmd = zii_pic_rdu_cmds;
@@ -245,7 +272,7 @@ static int zii_pic_configure(struct zii_pic_mfd *adev)
 	if (unlikely(!adev->mcu_ops.cmd))
 		BUG();
 
-	ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_GET_STATUS, NULL, 0);
+	ret = zii_pic_get_status(adev);
 	if (ret)
 		return ret;
 
@@ -289,7 +316,8 @@ static void zii_pic_state_work(struct work_struct *work)
 		if (ret) {
 			sys_close(adev->port_fd);
 			adev->state = PIC_STATE_UNKNOWN;
-			pr_err("unable to configure pic, ret: %d\n", ret);
+			pr_err("%s: unable to configure PIC, ret: %d\n",
+				__func__, ret);
 			break;
 		}
 		adev->state = PIC_STATE_CONFIGURED;
