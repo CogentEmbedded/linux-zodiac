@@ -99,7 +99,7 @@ static const struct watchdog_ops zii_pic_wdt_ops = {
 };
 
 static int zii_pic_wdt_restart_handler(struct notifier_block *this,
-				      unsigned long mode, void *cmd)
+				unsigned long mode, void *cmd)
 {
 	struct zii_pic_wdt *adev = container_of(this,
 						struct zii_pic_wdt,
@@ -108,43 +108,16 @@ static int zii_pic_wdt_restart_handler(struct notifier_block *this,
 #ifdef DEBUG
 	pr_emerg("%s: enter\n", __func__);
 #endif
+	/* HACK: workaround to let reset command pass through UART to PIC.
+	 * Reason: in machine_restart() all IRQs are disabled, and after
+	 * command is written to UART buffer it remains there, as no TX interrupt
+	 * is handled by IMX serial driver
+	 */
+	local_irq_enable();
+
 	zii_pic_watchdog_reset(adev->pic_dev, false);
 
 	return NOTIFY_DONE;
-}
-
-static unsigned int zii_pic_wdt_get_reset_reason(struct device *pic_dev)
-{
-	enum zii_pic_reset_reason reason;
-
-	pr_debug("%s: enter\n", __func__);
-
-	if (zii_pic_watchdog_get_reset_reason(pic_dev, &reason))
-		return 0;
-
-	switch (reason) {
-	case ZII_PIC_RESET_HW_WATCHDOG:
-	case ZII_PIC_RESET_SW_WATCHDOG:
-	case ZII_PIC_RESET_ILLEGAL_CONFIGURATION_WORD:
-	case ZII_PIC_RESET_ILLEGAL_INSTRUCTION:
-	case ZII_PIC_RESET_ILLEGAL_TRAP:
-		return WDIOF_CARDRESET;
-
-	case ZII_PIC_RESET_VOLTAGE:
-		return WDIOF_POWERUNDER;
-
-	case ZII_PIC_RESET_TEMPERATURE:
-		return WDIOF_OVERHEAT;
-
-	case ZII_PIC_RESET_USER_REQUEST:
-		return WDIOF_EXTERN1;
-
-	case ZII_PIC_RESET_POWER_OFF:
-	case ZII_PIC_RESET_HOST_REQUEST:
-	case ZII_PIC_RESET_UNKNOWN:
-	default:
-		return 0;
-	}
 }
 
 static int zii_pic_wdt_probe(struct platform_device *pdev)
@@ -172,7 +145,6 @@ static int zii_pic_wdt_probe(struct platform_device *pdev)
 	adev->wdt.min_timeout = ZII_PIC_WDT_MIN_TIMEOUT;
 	adev->wdt.max_timeout = ZII_PIC_WDT_MAX_TIMEOUT;
 	adev->wdt.status = WATCHDOG_NOWAYOUT_INIT_STATUS;
-	adev->wdt.bootstatus = zii_pic_wdt_get_reset_reason(pdev->dev.parent);
 
 	watchdog_set_drvdata(&adev->wdt, adev);
 	dev_set_drvdata(&pdev->dev, adev);

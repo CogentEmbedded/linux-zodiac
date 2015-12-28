@@ -18,7 +18,7 @@ struct n_mcu_cmd {
 
 struct n_mcu_ops {
 	int (*cmd)(struct n_mcu_cmd *);
-	int (*async_cmd)(struct n_mcu_cmd *);
+	int (*cmd_no_response)(struct n_mcu_cmd *);
 	void (*event)(struct n_mcu_cmd *);
 };
 

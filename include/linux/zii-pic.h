@@ -4,6 +4,8 @@
 #define ZII_PIC_DRVNAME_WATCHDOG	"pic-watchdog"
 #define ZII_PIC_DRVNAME_HWMON		"pic-hwmon"
 
+#define ZII_PIC_DEFAULT_BAUD_RATE	57600
+
 /* sequential list of all commands on all HW variants */
 enum zii_pic_cmd_id {
 	ZII_PIC_CMD_GET_STATUS,
@@ -36,20 +38,6 @@ enum zii_pic_event_id {
 
 /* Watchdog access API */
 
-enum zii_pic_reset_reason {
-	ZII_PIC_RESET_UNKNOWN,
-	ZII_PIC_RESET_POWER_OFF,
-	ZII_PIC_RESET_HW_WATCHDOG,
-	ZII_PIC_RESET_SW_WATCHDOG,
-	ZII_PIC_RESET_VOLTAGE,
-	ZII_PIC_RESET_HOST_REQUEST,
-	ZII_PIC_RESET_TEMPERATURE,
-	ZII_PIC_RESET_ILLEGAL_CONFIGURATION_WORD,
-	ZII_PIC_RESET_ILLEGAL_INSTRUCTION,
-	ZII_PIC_RESET_ILLEGAL_TRAP,
-	ZII_PIC_RESET_USER_REQUEST,
-};
-
 #define ZII_PIC_WDT_DEFAULT_TIMEOUT	180
 #define ZII_PIC_WDT_MIN_TIMEOUT 	60
 /* BUG: inside PIC firmware, it has MAX 300, it does not fit into u8 */
@@ -62,8 +50,6 @@ int zii_pic_watchdog_ping(struct device *pic_dev);
 int zii_pic_watchdog_set_timeout(struct device *pic_dev,
 				unsigned int timeout);
 void zii_pic_watchdog_reset(struct device *pic_dev, bool hw_recovery);
-int zii_pic_watchdog_get_reset_reason(struct device *pic_dev,
-				enum zii_pic_reset_reason *reason);
 
 /* HWMON API */
 enum zii_pic_sensor {

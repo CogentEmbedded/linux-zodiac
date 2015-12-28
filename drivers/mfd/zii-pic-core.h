@@ -1,6 +1,7 @@
 #ifndef _LINUX_ZII_PIC_CORE_H_
 #define _LINUX_ZII_PIC_CORE_H_
 
+#include <linux/tty.h>
 #include <linux/zii-pic.h>
 #include <linux/n_mcu.h>
 
@@ -42,11 +43,12 @@ struct zii_pic_mfd {
 	long				port_fd;
 	struct delayed_work		state_work;
 	struct tty_struct		*tty;
+	speed_t				baud;
 
 	/* cached watchdog state */
 	u8				watchdog_timeout;
 	u8				watchdog_enabled;
-	enum zii_pic_reset_reason	reset_reason;
+	u8				reset_reason;
 
 	/* sensors, missing on RDU? */
 	int				sensor_28v;

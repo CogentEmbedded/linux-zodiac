@@ -56,11 +56,15 @@ struct n_mcu_priv {
 	wait_queue_head_t	wait;
 	bool			opened;
 
+	atomic_t		transfer_in_progress;
+	bool			transfer_failed;
+
 	u8			tx_frame[MAX_SERIAL_BUF_SIZE];
 	size_t			tx_frame_size;
 
 	u8			rx_data[MAX_SERIAL_BUF_SIZE];
 	size_t			rx_data_size;
+	atomic_t		rx_ready;
 
 	enum parser_state	parser_state;
 
@@ -70,15 +74,17 @@ struct n_mcu_priv {
 			u8 *out, size_t *out_idx);
 	bool	(*validate_checksum)(const u8 const *data, size_t len);
 
+	void	(*response)(struct n_mcu_cmd *);
 	void	(*event)(struct n_mcu_cmd *);
 };
 
 static struct n_mcu_priv n_mcu_priv;
 static DEFINE_MUTEX(n_mcu_lock);
+static DEFINE_SPINLOCK(n_mcu_tx_lock);
 
 static void n_mcu_put_data(const u8 const *data,
 		size_t len, u8 *out, size_t *out_idx);
-static int n_mcu_event_response(struct n_mcu_cmd* cmd);
+static void n_mcu_event_response(void);
 
 
 
@@ -225,24 +231,25 @@ static int n_mcu_prepare_frame(struct n_mcu_priv *priv,
 
 static void n_mcu_handle_msg(struct n_mcu_priv *priv)
 {
+	pr_debug("%s: enter\n", __func__);
+
+	if (priv->validate_checksum &&
+	    !priv->validate_checksum(priv->rx_data, priv->rx_data_size)) {
+		n_mcu_priv.transfer_failed = true;
+		goto out;
+	}
+
 	/* this is cmd response */
-	if (!completion_done(&priv->cmd_complete)) {
-		complete(&priv->cmd_complete);
-		return;
+	if (atomic_read(&n_mcu_priv.transfer_in_progress)) {
+		if (!completion_done(&priv->cmd_complete))
+			complete(&priv->cmd_complete);
+		goto out;
 	}
 
-	/* this is event from MCU */
-	if (priv->event) {
-		struct n_mcu_cmd cmd;
-		cmd.size = priv->rx_data_size;
-		memcpy(cmd.data, priv->rx_data,
-			priv->rx_data_size);
-
-		priv->event(&cmd);
-
-		/* TODO: error handling? convert function to void? */
-		(void)n_mcu_event_response(&cmd);
-	}
+	/* otherwise it is event from MCU */
+	n_mcu_event_response();
+out:
+	atomic_set(&n_mcu_priv.transfer_in_progress, 0);
 }
 
 static void n_mcu_parse_data(struct n_mcu_priv *priv,
@@ -254,6 +261,9 @@ static void n_mcu_parse_data(struct n_mcu_priv *priv,
 		case EXPECT_SOF:
 			if (data[i] != STX)
 				break;
+
+			wait_event(priv->wait,
+				atomic_read(&priv->rx_ready));
 
 			priv->rx_data_size = 0;
 			priv->parser_state = EXPECT_DATA;
@@ -276,15 +286,13 @@ static void n_mcu_parse_data(struct n_mcu_priv *priv,
 				break;
 			}
 
-			priv->parser_state = EXPECT_SOF;
-			if (!priv->validate_checksum) {
-				n_mcu_handle_msg(priv);
-				break;
-			}
+			/* ETX */
 
-			if (priv->validate_checksum(priv->rx_data,
-						priv->rx_data_size))
-				n_mcu_handle_msg(priv);
+			atomic_set(&priv->rx_ready, 0);
+
+			priv->parser_state = EXPECT_SOF;
+
+			n_mcu_handle_msg(&n_mcu_priv);
 
 			break;
 
@@ -301,23 +309,25 @@ static void n_mcu_parse_data(struct n_mcu_priv *priv,
 
 int n_mcu_send_frame(struct n_mcu_priv *priv)
 {
-	u8 *frame = priv->tx_frame;
+	u8 *frame;
 	ssize_t to_write;
-	ssize_t ret;
 
 	pr_debug("%s: enter\n", __func__);
 
+	frame = priv->tx_frame;
 	to_write = priv->tx_frame_size;
 
 	set_bit(TTY_DO_WRITE_WAKEUP, &priv->tty->flags);
 	while (to_write) {
-		ret = priv->tty->ops->write(priv->tty, frame, to_write);
+		ssize_t ret = priv->tty->ops->write(priv->tty, frame, to_write);
 		if (ret < 0)
 			return ret;
 
 		to_write -= ret;
 		frame += ret;
 	};
+
+	atomic_set(&n_mcu_priv.rx_ready, 1);
 
 	return 0;
 }
@@ -327,62 +337,114 @@ static int n_mcu_execute_cmd(struct n_mcu_cmd* cmd)
 	int retry_count = MAX_RETRIES;
 	int ret;
 
-	mutex_lock(&n_mcu_lock);
-
 	pr_debug("%s: enter\n", __func__);
+
+start:
+	wait_event(n_mcu_priv.wait,
+		   !atomic_read(&n_mcu_priv.transfer_in_progress));
+
+	spin_lock(&n_mcu_tx_lock);
+
+	if (atomic_cmpxchg(&n_mcu_priv.transfer_in_progress, 0, 1)) {
+		spin_unlock(&n_mcu_tx_lock);
+		goto start;
+	}
 
 	ret = n_mcu_prepare_frame(&n_mcu_priv, cmd->data, cmd->size);
 	if (ret)
 		goto out;
 
-	do {
-		reinit_completion(&n_mcu_priv.cmd_complete);
+	reinit_completion(&n_mcu_priv.cmd_complete);
+	n_mcu_priv.transfer_failed = false;
 
-		ret = n_mcu_send_frame(&n_mcu_priv);
-		if (ret)
-			goto out;
+	ret = n_mcu_send_frame(&n_mcu_priv);
+	if (ret)
+		goto out;
 
-		if (wait_for_completion_timeout(&n_mcu_priv.cmd_complete,
-				msecs_to_jiffies(CMD_TIMEOUT))) {
+	spin_unlock(&n_mcu_tx_lock);
+
+	if (wait_for_completion_timeout(&n_mcu_priv.cmd_complete,
+					msecs_to_jiffies(CMD_TIMEOUT))) {
+
+		if (!n_mcu_priv.transfer_failed) {
 			cmd->size = n_mcu_priv.rx_data_size;
 			memcpy(cmd->data, n_mcu_priv.rx_data,
-				n_mcu_priv.rx_data_size);
-		} else
-			ret = -ETIMEDOUT;
+			       n_mcu_priv.rx_data_size);
+			goto out;
+		}
+		/* else it is failed due to checksum validation,
+		 * fallback to retry loop */
+	} else
+		atomic_set(&n_mcu_priv.transfer_in_progress, 0);
 
-	} while (ret && --retry_count);
+	if (--retry_count)
+		goto start;
+
+	return -ETIMEDOUT;
 
 out:
-	mutex_unlock(&n_mcu_lock);
+	if (ret) {
+		atomic_set(&n_mcu_priv.transfer_in_progress, 0);
+		spin_unlock(&n_mcu_tx_lock);
+	}
+
 	return ret;
 }
 
-/* For commands without response, e.g. system restart command */
-static int n_mcu_execute_async_cmd(struct n_mcu_cmd* cmd)
+static int n_mcu_execute_cmd_no_response(struct n_mcu_cmd* cmd)
 {
 	int ret;
-
-	mutex_lock(&n_mcu_lock);
 
 	pr_debug("%s: enter\n", __func__);
 
+	/* No wait for completion of previous transfer.
+	 * This is special function to send high priority commands in atomic
+	 * context, e.g. HW reset from kernel restart handler */
+
+	spin_lock(&n_mcu_tx_lock);
+
+	if (atomic_cmpxchg(&n_mcu_priv.transfer_in_progress, 0, 1))
+		pr_warn("%s: previous transfer not completed\n", __func__);
+
 	ret = n_mcu_prepare_frame(&n_mcu_priv, cmd->data, cmd->size);
 	if (ret)
-		goto out;
+		goto err;
+
+	n_mcu_priv.transfer_failed = false;
 
 	ret = n_mcu_send_frame(&n_mcu_priv);
-out:
-	mutex_unlock(&n_mcu_lock);
+
+err:
+	if (ret)
+		atomic_set(&n_mcu_priv.transfer_in_progress, 0);
+
+	spin_unlock(&n_mcu_tx_lock);
 	return ret;
 }
 
-static int n_mcu_event_response(struct n_mcu_cmd* cmd)
+static void n_mcu_event_response(void)
 {
+	struct n_mcu_cmd cmd;
 	int ret;
 
-	mutex_lock(&n_mcu_lock);
+start:
+	wait_event(n_mcu_priv.wait,
+		!atomic_read(&n_mcu_priv.transfer_in_progress));
 
-	ret = n_mcu_prepare_frame(&n_mcu_priv, cmd->data, cmd->size);
+	spin_lock(&n_mcu_tx_lock);
+
+	if (atomic_cmpxchg(&n_mcu_priv.transfer_in_progress, 0, 1)) {
+		spin_unlock(&n_mcu_tx_lock);
+		goto start;
+	}
+
+	cmd.size = n_mcu_priv.rx_data_size;
+	memcpy(cmd.data, n_mcu_priv.rx_data, n_mcu_priv.rx_data_size);
+
+	if (!n_mcu_priv.event)
+		n_mcu_priv.event(&cmd);
+
+	ret = n_mcu_prepare_frame(&n_mcu_priv, cmd.data, cmd.size);
 	if (ret)
 		goto out;
 
@@ -391,8 +453,7 @@ static int n_mcu_event_response(struct n_mcu_cmd* cmd)
 		goto out;
 
 out:
-	mutex_unlock(&n_mcu_lock);
-	return ret;
+	spin_unlock(&n_mcu_tx_lock);
 }
 
 static int n_mcu_configure_ops(struct n_mcu_priv *priv,
@@ -400,11 +461,11 @@ static int n_mcu_configure_ops(struct n_mcu_priv *priv,
 {
 	mutex_lock(&n_mcu_lock);
 
-	/* provide cmd execution call to client */
+	/* provide cmd execution calls to client */
 	ops->cmd = n_mcu_execute_cmd;
-	ops->async_cmd = n_mcu_execute_async_cmd;
+	ops->cmd_no_response = n_mcu_execute_cmd_no_response;
 
-	/* get event callback from client */
+	/* callbacks from client */
 	priv->event = ops->event;
 
 	mutex_unlock(&n_mcu_lock);
@@ -456,8 +517,6 @@ static void n_mcu_close(struct tty_struct *tty)
 
 	pr_debug("%s: enter\n", __func__);
 
-	WARN_ON(priv->tty != n_mcu_priv.tty);
-
 	tty_driver_flush_buffer(tty);
 
 	tty_kref_put(n_mcu_priv.tty);
@@ -491,22 +550,12 @@ static int n_mcu_ioctl(struct tty_struct *tty, struct file *file,
 	}
 }
 
-static ssize_t n_mcu_read(struct tty_struct * tty, struct file * file,
-		u8 __user * buf, size_t nr)
-{
-	struct n_mcu_priv *priv = tty->disc_data;
-
-	pr_debug("%s: enter\n", __func__);
-
-	wait_event_interruptible(priv->wait, !priv->opened);
-
-	return 0;
-}
-
 static void n_mcu_receive(struct tty_struct *tty, const u8 *data,
 		char *flags, int count)
 {
 	struct n_mcu_priv *priv = tty->disc_data;
+
+	pr_debug("%s: enter: %u\n", __func__, current->pid);
 
 	WARN_ON(priv->tty != n_mcu_priv.tty);
 
@@ -525,7 +574,6 @@ static struct tty_ldisc_ops n_mcu_ldisc = {
 	.open		= n_mcu_open,
 	.close		= n_mcu_close,
 	.ioctl		= n_mcu_ioctl,
-	.read		= n_mcu_read,
 	.receive_buf	= n_mcu_receive,
 };
 

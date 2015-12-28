@@ -20,8 +20,8 @@
 
 #define DEBUG
 
+#include <linux/delay.h>
 #include <linux/sched.h>
-
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -32,7 +32,6 @@
 #include <linux/slab.h>
 #include <linux/serial_core.h>
 #include <linux/syscalls.h>
-#include <linux/tty.h>
 
 #include <linux/uart_slave.h>
 
@@ -98,6 +97,7 @@ static int zii_pic_mcu_cmd(struct zii_pic_mfd *adev,
 		enum zii_pic_cmd_id id, const u8 * const data, u8 data_size)
 {
 	struct n_mcu_cmd mcu_cmd;
+	u8 ack_id;
 	int ret;
 
 	pr_debug("%s: enter\n", __func__);
@@ -107,7 +107,7 @@ static int zii_pic_mcu_cmd(struct zii_pic_mfd *adev,
 
 	mcu_cmd.size = 2 + adev->cmd[id].data_len;
 	mcu_cmd.data[0] = adev->cmd[id].cmd_id;
-	mcu_cmd.data[1] = atomic_inc_return(&adev->cmd_seqn);
+	mcu_cmd.data[1] = ack_id = atomic_inc_return(&adev->cmd_seqn);
 
 	/* cmd specific data */
 	if (data_size) {
@@ -128,6 +128,10 @@ static int zii_pic_mcu_cmd(struct zii_pic_mfd *adev,
 			16, 1, mcu_cmd.data, mcu_cmd.size, true);
 #endif
 
+	/* check if it is our response */
+	if (ack_id != mcu_cmd.data[1])
+		return -EAGAIN;
+
 	/* now cmd data contains response */
 	if (adev->cmd[id].response_handler)
 		/* do not show header and checksum to handler */
@@ -139,11 +143,10 @@ static int zii_pic_mcu_cmd(struct zii_pic_mfd *adev,
 	return 0;
 }
 
-static int zii_pic_mcu_async_cmd(struct zii_pic_mfd *adev,
+static int zii_pic_mcu_cmd_no_response(struct zii_pic_mfd *adev,
 		enum zii_pic_cmd_id id, const u8 * const data, u8 data_size)
 {
 	struct n_mcu_cmd mcu_cmd;
-	int ret;
 
 	pr_debug("%s: enter\n", __func__);
 
@@ -164,13 +167,21 @@ static int zii_pic_mcu_async_cmd(struct zii_pic_mfd *adev,
 			16, 1, mcu_cmd.data, mcu_cmd.size, true);
 #endif
 
-	ret = adev->mcu_ops.async_cmd(&mcu_cmd);
-	if (ret)
-		return ret;
-
-	return 0;
+	return adev->mcu_ops.cmd_no_response(&mcu_cmd);
 }
 
+void zii_pic_get_reset_reason(struct zii_pic_mfd *adev)
+{
+	int ret;
+
+	pr_debug("%s: enter\n", __func__);
+
+	ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_GET_RESET_REASON, NULL, 0);
+	if (ret) {
+		pr_warn("Failed to get reset reason (err = %d)\n", ret);
+		adev->reset_reason = 0xFF;
+	}
+}
 
 static int zii_pic_configure(struct zii_pic_mfd *adev)
 {
@@ -181,13 +192,14 @@ static int zii_pic_configure(struct zii_pic_mfd *adev)
 	pr_debug("%s: enter\n", __func__);
 
 	ktermios = adev->tty->termios;
-
-	ktermios.c_cflag = B57600 | CS8 | CLOCAL | CREAD;
+	ktermios.c_cflag = CS8 | CLOCAL | CREAD;
 	ktermios.c_iflag = IGNPAR;
 	ktermios.c_oflag = 0;
 	ktermios.c_lflag = 0;
 	ktermios.c_cc[VMIN]=0;
 	ktermios.c_cc[VTIME]=100;
+
+	tty_termios_encode_baud_rate(&ktermios, adev->baud, adev->baud);
 
 	tty_set_termios(adev->tty, &ktermios);
 
@@ -236,6 +248,8 @@ static int zii_pic_configure(struct zii_pic_mfd *adev)
 	ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_GET_STATUS, NULL, 0);
 	if (ret)
 		return ret;
+
+	zii_pic_get_reset_reason(adev);
 
 	ret = mfd_add_devices(adev->dev, -1, zii_pic_devices,
 			ARRAY_SIZE(zii_pic_devices), NULL, 0, NULL);
@@ -322,7 +336,7 @@ static int zii_pic_uart_open(struct tty_struct *tty, struct file *filp)
 	return 0;
 }
 
-static ssize_t zii_pic_get_version(struct device *dev,
+static ssize_t zii_pic_show_version(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
 	struct zii_pic_mfd *adev = dev_get_drvdata(dev);
@@ -333,26 +347,28 @@ static ssize_t zii_pic_get_version(struct device *dev,
 	switch (adev->hw_id) {
 	case PIC_HW_ID_NIU:
 		ret = snprintf(buf, PAGE_SIZE, "PIC HW type: NIU\n");
+		break;
 
 	case PIC_HW_ID_MEZZ:
 		ret = snprintf(buf, PAGE_SIZE, "PIC HW type: MEZZ\n");
+		break;
 
 	case PIC_HW_ID_RDU:
 		ret = snprintf(buf, PAGE_SIZE, "PIC HW type: RDU\n");
+		break;
 
 	default:
 		return 0;
 	}
 
 	buf += ret;
-	ret += snprintf(buf, PAGE_SIZE - ret, "Bootloader: %d.%d.%d%c%c\n",
+	ret += snprintf(buf, PAGE_SIZE - ret,
+			"Bootloader: %d.%d.%d%c%c\nFirmware: %d.%d.%d%c%c\n",
 			adev->bootloader_version.hw,
 			adev->bootloader_version.major,
 			adev->bootloader_version.minor,
 			adev->bootloader_version.letter_1,
-			adev->bootloader_version.letter_2);
-	buf += ret;
-	ret += snprintf(buf, PAGE_SIZE - ret, "Firmware: %d.%d.%d%c%c\n",
+			adev->bootloader_version.letter_2,
 			adev->firmware_version.hw,
 			adev->firmware_version.major,
 			adev->firmware_version.minor,
@@ -362,12 +378,23 @@ static ssize_t zii_pic_get_version(struct device *dev,
 	return ret;
 }
 
-static DEVICE_ATTR(version, S_IRUSR | S_IRGRP, zii_pic_get_version, NULL);
+static DEVICE_ATTR(version, S_IRUSR | S_IRGRP, zii_pic_show_version, NULL);
 
-/* TODO: gather requirements which PIC attributes will be visible via sysfs */
+static ssize_t zii_pic_show_reset_reason(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct zii_pic_mfd *adev = dev_get_drvdata(dev);
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", adev->reset_reason);
+}
+
+static DEVICE_ATTR(reset_reason, S_IRUSR | S_IRGRP,
+		zii_pic_show_reset_reason, NULL);
+
 
 static struct attribute *zii_pic_dev_attrs[] = {
 	&dev_attr_version.attr,
+	&dev_attr_reset_reason.attr,
 	NULL
 };
 
@@ -412,9 +439,10 @@ static int zii_pic_mfd_probe(struct device *dev)
 	struct uart_slave *slave = container_of(dev, struct uart_slave, dev);
 	struct zii_pic_mfd *adev;
 	const struct of_device_id *id;
+	u32 baud;
 	int ret;
 
-	pr_debug("%s: enter: dev: %p\n", __func__, dev);
+	pr_debug("%s: enter\n", __func__);
 
 	if (dev->parent == NULL)
 		return -ENODEV;
@@ -430,15 +458,16 @@ static int zii_pic_mfd_probe(struct device *dev)
 	adev->dev = dev;
 	adev->hw_id = (enum pic_hw_id)id->data;
 
+	if (of_property_read_u32(dev->of_node, "current-speed", &baud))
+		adev->baud = ZII_PIC_DEFAULT_BAUD_RATE;
+	else
+		adev->baud = baud;
 	adev->mcu_ops.event = zii_pic_event_handler;
+
 	slave->device_added = zii_pic_device_added;
 
 	adev->uart_open = slave->ops.open;
 	slave->ops.open = zii_pic_uart_open;
-
-	/* TODO: check if close needs to be overridden as well
-	 * What would be the consequences of calling close/read/write adn other fops on the device?
-	*/
 
 	ret = zii_pic_create_sysfs_groups(dev, adev);
 
@@ -515,13 +544,17 @@ int zii_pic_watchdog_disable(struct device *pic_dev)
 int zii_pic_watchdog_get_status(struct device *pic_dev)
 {
 	struct zii_pic_mfd *adev = dev_get_drvdata(pic_dev);
-
-	/* BUG: in PIC firmware: GET variant is not implemented */
-#ifdef ZII_PIC_HAS_FIXED_WDT_GET
 	u8 data = 1;
 	int ret;
 
 	pr_debug("%s: enter\n", __func__);
+
+	/* Special case for NIU HW as firmware does not respond properly */
+	if (adev->hw_id == PIC_HW_ID_NIU) {
+		adev->watchdog_enabled = 1;
+		adev->watchdog_timeout = ZII_PIC_WDT_DEFAULT_TIMEOUT;
+		return 0;
+	}
 
 	ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_SW_WDT_GET,
 				&data, sizeof(data));
@@ -529,14 +562,6 @@ int zii_pic_watchdog_get_status(struct device *pic_dev)
 		pr_err("Failed to get watchdog status (err = %d)\n", ret);
 
 	return ret;
-#else
-	pr_debug("%s: enter\n", __func__);
-
-	adev->watchdog_enabled = 1;
-	adev->watchdog_timeout = ZII_PIC_WDT_DEFAULT_TIMEOUT;
-	return 0;
-#endif
-
 }
 
 int zii_pic_watchdog_ping(struct device *pic_dev)
@@ -585,28 +610,18 @@ void zii_pic_watchdog_reset(struct device *pic_dev, bool hw_recovery)
 
 	pr_debug("%s: enter\n", __func__);
 
-	ret = zii_pic_mcu_async_cmd(adev, ZII_PIC_CMD_RESET, &data, sizeof(data));
-	if (ret)
-		pr_alert_ratelimited("Failed to shutdown (err = %d)\n", ret);
-}
+	for (;;) {
+		ret = zii_pic_mcu_cmd_no_response(adev, ZII_PIC_CMD_RESET,
+					&data, sizeof(data));
+		if (ret)
+			pr_emerg("%s: failed to reset (err = %d)\n",
+				__func__, ret);
 
-int zii_pic_watchdog_get_reset_reason(struct device *pic_dev,
-				      enum zii_pic_reset_reason *reason)
-{
-	struct zii_pic_mfd *adev = dev_get_drvdata(pic_dev);
-	int ret;
+		/* PIC firmware waits for 500 ms before resetting */
+		mdelay(550);
 
-	pr_debug("%s: enter\n", __func__);
-
-	ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_GET_RESET_REASON, NULL, 0);
-	if (ret)
-		pr_err("Failed to get reset reason (err = %d)\n", ret);
-
-	*reason = adev->reset_reason;
-
-	pr_debug("%s: reset reason: %d\n", __func__, *reason);
-
-	return ret;
+		pr_emerg("%s: reset cmd timed out, repeat\n", __func__);
+	}
 }
 
 int zii_pic_hwmon_read_sensor(struct device *pic_dev,

@@ -130,24 +130,11 @@ int zii_pic_niu_process_watchdog_state(struct zii_pic_mfd *adev,
 int zii_pic_niu_process_reset_reason(struct zii_pic_mfd *adev,
 		u8 *data, u8 size)
 {
-	static enum zii_pic_reset_reason reason_map[] = {
-		ZII_PIC_RESET_POWER_OFF,	/* 0x00 */
-		ZII_PIC_RESET_HW_WATCHDOG,	/* 0x01 */
-		ZII_PIC_RESET_SW_WATCHDOG,	/* 0x02 */
-		ZII_PIC_RESET_VOLTAGE,		/* 0x03 */
-		ZII_PIC_RESET_HOST_REQUEST,	/* 0x04 */
-		ZII_PIC_RESET_TEMPERATURE,	/* 0x05 */
-		ZII_PIC_RESET_ILLEGAL_CONFIGURATION_WORD, /* 0x06 */
-		ZII_PIC_RESET_ILLEGAL_INSTRUCTION, /* 0x07 */
-		ZII_PIC_RESET_ILLEGAL_TRAP,	/* 0x08 */
-		ZII_PIC_RESET_UNKNOWN		/* 0x09 */
-	};
-
 	/* bad response, ignore */
-	if (size != 1 || *data > ARRAY_SIZE(reason_map))
+	if (size != 1)
 		return -EINVAL;
 
-	adev->reset_reason = reason_map[*data];
+	adev->reset_reason = *data;
 
 	return 0;
 }
