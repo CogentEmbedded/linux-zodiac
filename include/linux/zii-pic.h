@@ -25,6 +25,10 @@ enum zii_pic_cmd_id {
 	ZII_PIC_CMD_GET_3V3_READING,
 	ZII_PIC_CMD_GET_TEMPERATURE,
 
+	/* Board specific variants */
+	ZII_PIC_CMD_GET_FIRMWARE_VERSION,
+	ZII_PIC_CMD_GET_BOOTLOADER_VERSION,
+
 	/* last one to get amount of supported commands */
 	ZII_PIC_CMD_COUNT
 };

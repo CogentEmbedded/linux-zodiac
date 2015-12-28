@@ -37,6 +37,7 @@
 
 #include "zii-pic-niu.h"
 #include "zii-pic-mezz.h"
+#include "zii-pic-esb.h"
 #include "zii-pic-rdu.h"
 
 #define DRIVER_NAME		"zii-pic-mfd"
@@ -103,7 +104,7 @@ static int zii_pic_mcu_cmd(struct zii_pic_mfd *adev,
 
 	pr_debug("%s: enter\n", __func__);
 
-	if (unlikely(data_size != adev->cmd[id].data_len))
+	if (unlikely(!adev->cmd[id].cmd_id || data_size != adev->cmd[id].data_len))
 		return -EINVAL;
 
 	mcu_cmd.size = 2 + adev->cmd[id].data_len;
@@ -190,15 +191,22 @@ static int zii_pic_get_status(struct zii_pic_mfd *adev)
 
 	switch (adev->hw_id) {
 	case PIC_HW_ID_NIU:
+	case PIC_HW_ID_RDU:
 		ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_GET_STATUS, NULL, 0);
 		break;
 
 	case PIC_HW_ID_MEZZ:
 	case PIC_HW_ID_ESB:
-	case PIC_HW_ID_RDU:
+		ret = zii_pic_mcu_cmd(adev,
+				ZII_PIC_CMD_GET_FIRMWARE_VERSION, NULL, 0);
+		if (ret)
+			break;
+		ret = zii_pic_mcu_cmd(adev,
+				ZII_PIC_CMD_GET_BOOTLOADER_VERSION, NULL, 0);
+		break;
+
 	default:
-		/* TODO: read firmware and bootloader versions */
-		ret = 0;
+		BUG();
 		break;
 	}
 
@@ -245,7 +253,7 @@ static int zii_pic_configure(struct zii_pic_mfd *adev)
 
 	case PIC_HW_ID_ESB:
 		checksum_type = N_MCU_CHECKSUM_CRC16;
-		adev->cmd = zii_pic_niu_cmds;
+		adev->cmd = zii_pic_esb_cmds;
 		adev->checksum_size = 2;
 		break;
 
@@ -381,6 +389,10 @@ static ssize_t zii_pic_show_version(struct device *dev,
 		ret = snprintf(buf, PAGE_SIZE, "PIC HW type: MEZZ\n");
 		break;
 
+	case PIC_HW_ID_ESB:
+		ret = snprintf(buf, PAGE_SIZE, "PIC HW type: ESB\n");
+		break;
+
 	case PIC_HW_ID_RDU:
 		ret = snprintf(buf, PAGE_SIZE, "PIC HW type: RDU\n");
 		break;
@@ -391,7 +403,7 @@ static ssize_t zii_pic_show_version(struct device *dev,
 
 	buf += ret;
 	ret += snprintf(buf, PAGE_SIZE - ret,
-			"Bootloader: %d.%d.%d%c%c\nFirmware: %d.%d.%d%c%c\n",
+			"Bootloader: %d.%d.%d.%c%c\nFirmware: %d.%d.%d.%c%c\n",
 			adev->bootloader_version.hw,
 			adev->bootloader_version.major,
 			adev->bootloader_version.minor,

@@ -72,4 +72,6 @@ struct pic_cmd_desc {
 	zii_pic_handler_t	response_handler;
 };
 
+/* common response handlers */
+
 #endif /* _LINUX_ZII_PIC_CORE_H_ */

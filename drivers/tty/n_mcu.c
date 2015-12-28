@@ -555,7 +555,7 @@ static void n_mcu_receive(struct tty_struct *tty, const u8 *data,
 {
 	struct n_mcu_priv *priv = tty->disc_data;
 
-	pr_debug("%s: enter: %u\n", __func__, current->pid);
+	pr_debug("%s: enter\n", __func__);
 
 	WARN_ON(priv->tty != n_mcu_priv.tty);
 

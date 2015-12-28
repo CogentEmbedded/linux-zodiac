@@ -38,8 +38,11 @@ int zii_pic_niu_process_5v(struct zii_pic_mfd *adev,
 				u8 *data, u8 size);
 int zii_pic_niu_process_3v3(struct zii_pic_mfd *adev,
 				u8 *data, u8 size);
-
 int zii_pic_niu_process_temperature(struct zii_pic_mfd *adev,
+				u8 *data, u8 size);
+int zii_pic_niu_process_firmware_version(struct zii_pic_mfd *adev,
+				u8 *data, u8 size);
+int zii_pic_niu_process_bootloader_version(struct zii_pic_mfd *adev,
 				u8 *data, u8 size);
 
 extern struct pic_cmd_desc zii_pic_niu_cmds[ZII_PIC_CMD_COUNT];

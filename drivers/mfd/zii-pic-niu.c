@@ -44,13 +44,17 @@ struct pic_cmd_desc zii_pic_niu_cmds[ZII_PIC_CMD_COUNT] = {
 	/* ZII_PIC_CMD_GET_28V_READING */
 	{0x1A, 0, zii_pic_niu_process_28v},
 	/* ZII_PIC_CMD_GET_12V_READING */
-	{0x2C, 0, zii_pic_niu_process_12v},
+	{0, 0, NULL},
 	/* ZII_PIC_CMD_GET_5V_READING */
-	{0x2E, 0, zii_pic_niu_process_5v},
+	{0, 0, NULL},
 	/* ZII_PIC_CMD_GET_3V3_READING */
-	{0x2F, 0, zii_pic_niu_process_3v3},
+	{0, 0, NULL},
 	/* ZII_PIC_CMD_GET_TEMPERATURE */
 	{0x19, 0, zii_pic_niu_process_temperature},
+	/* ZII_PIC_CMD_GET_FIRMWARE_VERSION */
+	{0x11, 0, zii_pic_niu_process_firmware_version},
+	/* ZII_PIC_CMD_GET_BOOTLOADER_VERSION */
+	{0x12, 0, zii_pic_niu_process_bootloader_version},
 };
 
 int zii_pic_niu_process_status_response(struct zii_pic_mfd *adev,
@@ -208,3 +212,29 @@ int zii_pic_niu_process_temperature(struct zii_pic_mfd *adev,
 
 	return 0;
 }
+
+int zii_pic_niu_process_firmware_version(struct zii_pic_mfd *adev,
+				u8 *data, u8 size)
+{
+	/* bad response, ignore */
+	if (size != sizeof(struct pic_version))
+		return -EINVAL;
+
+	/* convert to millidegree Celsius */
+	memcpy(&adev->firmware_version, data, size);
+
+	return 0;
+}
+int zii_pic_niu_process_bootloader_version(struct zii_pic_mfd *adev,
+				u8 *data, u8 size)
+{
+	/* bad response, ignore */
+	if (size != sizeof(struct pic_version))
+		return -EINVAL;
+
+	/* convert to millidegree Celsius */
+	memcpy(&adev->bootloader_version, data, size);
+
+	return 0;
+}
+

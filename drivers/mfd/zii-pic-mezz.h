@@ -5,4 +5,4 @@
 
 extern struct pic_cmd_desc zii_pic_mezz_cmds[ZII_PIC_CMD_COUNT];
 
-#endif /* _LINUX_ZII_PIC_NIU_H_ */
+#endif /* _LINUX_ZII_PIC_MEZZ_H_ */
