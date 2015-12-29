@@ -104,7 +104,12 @@ static int zii_pic_mcu_cmd(struct zii_pic_mfd *adev,
 
 	pr_debug("%s: enter\n", __func__);
 
-	if (unlikely(!adev->cmd[id].cmd_id || data_size != adev->cmd[id].data_len))
+	if (unlikely(!adev->cmd[id].cmd_id)) {
+		pr_warn("%s: command: %d not implemented\n", __func__, id);
+		return 0;
+	}
+
+	if (unlikely(data_size != adev->cmd[id].data_len))
 		return -EINVAL;
 
 	mcu_cmd.size = 2 + adev->cmd[id].data_len;
@@ -151,6 +156,9 @@ static int zii_pic_mcu_cmd_no_response(struct zii_pic_mfd *adev,
 	struct n_mcu_cmd mcu_cmd;
 
 	pr_debug("%s: enter\n", __func__);
+
+	if (unlikely(!adev->cmd[id].cmd_id))
+		return -ENOENT;
 
 	if (unlikely(data_size != adev->cmd[id].data_len))
 		return -EINVAL;
@@ -598,6 +606,7 @@ int zii_pic_watchdog_get_status(struct device *pic_dev)
 
 	ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_SW_WDT_GET,
 				&data, sizeof(data));
+
 	if (ret)
 		pr_err("Failed to get watchdog status (err = %d)\n", ret);
 

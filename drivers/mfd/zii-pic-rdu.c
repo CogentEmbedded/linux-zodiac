@@ -28,29 +28,33 @@
 
 struct pic_cmd_desc zii_pic_rdu_cmds[ZII_PIC_CMD_COUNT] = {
 	/* ZII_PIC_CMD_GET_STATUS */
-	{0xA0, 2, zii_pic_rdu_process_status_response},
+	{0xA0, 0, zii_pic_rdu_process_status_response},
 	/* ZII_PIC_CMD_SW_WDT_SET */
-	{0xA1, 5},
+	{0xA1, 3, NULL},
 	/* ZII_PIC_CMD_SW_WDT_GET */
-	{0,    0},
+	{0,    0, NULL},
 	/* ZII_PIC_CMD_PET_WDT    */
-	{0xA2, 2},
+	{0xA2, 0, NULL},
 	/* ZII_PIC_CMD_RESET  */
-	{0xA7, 3},
+	{0xA7, 1, NULL},
 	/* ZII_PIC_CMD_HW_RECOVERY_RESET  */
-	{0xA7, 4},
+	{0xA7, 2, NULL},
 	/* ZII_PIC_CMD_GET_RESET_REASON */
-	{0xA8, 2, zii_pic_rdu_process_reset_reason},
+	{0xA8, 0, zii_pic_rdu_process_reset_reason},
 	/* ZII_PIC_CMD_GET_28V_READING */
-	{0, 0},
+	{0, 0, NULL},
 	/* ZII_PIC_CMD_GET_12V_READING */
-	{0, 0},
+	{0, 0, NULL},
 	/* ZII_PIC_CMD_GET_5V_READING */
-	{0, 0},
+	{0, 0, NULL},
 	/* ZII_PIC_CMD_GET_3V3_READING */
-	{0, 0},
+	{0, 0, NULL},
 	/* ZII_PIC_CMD_GET_TEMPERATURE */
-	{0, 0},
+	{0, 0, NULL},
+	/* ZII_PIC_CMD_GET_FIRMWARE_VERSION */
+	{0, 0, NULL},
+	/* ZII_PIC_CMD_GET_BOOTLOADER_VERSION */
+	{0, 0, NULL},
 };
 
 int zii_pic_rdu_process_status_response(struct zii_pic_mfd *adev,
@@ -59,9 +63,14 @@ int zii_pic_rdu_process_status_response(struct zii_pic_mfd *adev,
 	struct pic_rdu_status_info *status =
 			(struct pic_rdu_status_info*)data;
 
+	pr_debug("%s: enter\n", __func__);
+
 	/* bad response, ignore */
 	if (size != sizeof(*status))
 		return -EINVAL;
+
+	memcpy(&adev->bootloader_version, &data[0], 6);
+	memcpy(&adev->firmware_version, &data[6], 6);
 
 	return 0;
 }
@@ -69,10 +78,13 @@ int zii_pic_rdu_process_status_response(struct zii_pic_mfd *adev,
 int zii_pic_rdu_process_reset_reason(struct zii_pic_mfd *adev,
 		u8 *data, u8 size)
 {
+	pr_debug("%s: enter\n", __func__);
+
+#if 0
 	/* bad response, ignore */
 	if (size != 1)
 		return -EINVAL;
-
+#endif
 	adev->reset_reason = *data;
 
 	return 0;

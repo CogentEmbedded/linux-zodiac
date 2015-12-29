@@ -141,7 +141,7 @@ static int zii_pic_hwmon_probe(struct platform_device *pdev)
 	pr_debug("%s: enter\n", __func__);
 
 	count = of_property_count_strings(node, "sensors");
-	if (!count) {
+	if (count <= 0) {
 		pr_err("%s: available sensor list is not provided\n", __func__);
 		return -EINVAL;
 	}
