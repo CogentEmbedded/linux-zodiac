@@ -24,7 +24,13 @@
 #include <linux/kernel.h>
 #include <linux/device.h>
 
+#include "zii-pic-niu.h"
 #include "zii-pic-rdu.h"
+
+/* Main RDU EEPROM has same command/response structure */
+#define zii_pic_rdu_process_eeprom_read		zii_pic_niu_process_eeprom_read
+#define zii_pic_rdu_process_eeprom_write	zii_pic_niu_process_eeprom_write
+
 
 struct pic_cmd_desc zii_pic_rdu_cmds[ZII_PIC_CMD_COUNT] = {
 	/* ZII_PIC_CMD_GET_STATUS */
@@ -51,6 +57,10 @@ struct pic_cmd_desc zii_pic_rdu_cmds[ZII_PIC_CMD_COUNT] = {
 	{0, 0, NULL},
 	/* ZII_PIC_CMD_GET_TEMPERATURE */
 	{0, 0, NULL},
+	/* ZII_PIC_CMD_EEPROM_READ */
+	{0xA4, 3, zii_pic_rdu_process_eeprom_read},
+	/* ZII_PIC_CMD_EEPROM_WRITE */
+	{0xA4, 35, zii_pic_rdu_process_eeprom_write},
 	/* ZII_PIC_CMD_GET_FIRMWARE_VERSION */
 	{0, 0, NULL},
 	/* ZII_PIC_CMD_GET_BOOTLOADER_VERSION */

@@ -153,12 +153,13 @@ static int zii_pic_wdt_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
+#if 0 /// temporary disable WDT reset, to use IMX SoC
 	adev->restart_handler.notifier_call = zii_pic_wdt_restart_handler;
 	adev->restart_handler.priority = 255;
 	ret = register_restart_handler(&adev->restart_handler);
 	if (ret)
 		pr_err("Failed to register restart handler (err = %d)\n", ret);
-
+#endif
 	return 0;
 }
 

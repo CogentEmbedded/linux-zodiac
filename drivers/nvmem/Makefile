@@ -10,3 +10,5 @@ obj-$(CONFIG_QCOM_QFPROM)	+= nvmem_qfprom.o
 nvmem_qfprom-y			:= qfprom.o
 obj-$(CONFIG_NVMEM_SUNXI_SID)	+= nvmem_sunxi_sid.o
 nvmem_sunxi_sid-y		:= sunxi_sid.o
+obj-$(CONFIG_ZII_PIC_EEPROM)	+= nvmem_zii_pic_eeprom.o
+nvmem_zii_pic_eeprom-y		:= zii-pic-eeprom.o

@@ -3744,7 +3744,8 @@ CONFIG_RAS=y
 # Android
 #
 # CONFIG_ANDROID is not set
-# CONFIG_NVMEM is not set
+CONFIG_NVMEM=y
+CONFIG_ZII_PIC_EEPROM=y
 
 #
 # Firmware Drivers

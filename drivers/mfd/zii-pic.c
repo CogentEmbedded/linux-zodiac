@@ -72,6 +72,10 @@ static const struct mfd_cell zii_pic_devices[] = {
 		.of_compatible = "zii,pic-hwmon",
 		.name = ZII_PIC_DRVNAME_HWMON,
 	},
+	{
+		.of_compatible = "zii,pic-eeprom",
+		.name = ZII_PIC_DRVNAME_EEPROM,
+	},
 };
 
 static int zii_pic_device_added(struct uart_slave *slave)
@@ -722,6 +726,98 @@ int zii_pic_hwmon_read_sensor(struct device *pic_dev,
 	}
 
 	return ret;
+}
+
+static int zii_pic_eeprom_read_page(struct zii_pic_mfd *adev,
+				    u16 page)
+{
+	u8 cmd_data[3] = {1, page & 0xFF, page >> 8};
+	return zii_pic_mcu_cmd(adev, ZII_PIC_CMD_EEPROM_READ,
+			      cmd_data, sizeof(cmd_data));
+}
+
+static int zii_pic_eeprom_write_page(struct zii_pic_mfd *adev,
+				     u16 page, const u8 *data)
+{
+	u8 cmd_data[35] = {0, page & 0xFF, page >> 8};
+	memcpy(&cmd_data[3], data, ZII_PIC_EEPROM_PAGE_SIZE);
+	return zii_pic_mcu_cmd(adev, ZII_PIC_CMD_EEPROM_WRITE,
+			      cmd_data, sizeof(cmd_data));
+}
+
+int zii_pic_eeprom_read(struct device *pic_dev,
+		u16 reg, void *val, size_t val_size)
+{
+	struct zii_pic_mfd *adev = dev_get_drvdata(pic_dev);
+	int page = reg >> 5;
+	int offset = reg & 0x1f;
+	size_t bytes_left = val_size;
+	int ret;
+
+	pr_debug("%s: enter\n", __func__);
+
+	do {
+		int count = bytes_left > ZII_PIC_EEPROM_PAGE_SIZE ?
+			ZII_PIC_EEPROM_PAGE_SIZE : bytes_left;
+
+		if (unlikely(count + offset > ZII_PIC_EEPROM_PAGE_SIZE))
+			count -= offset;
+
+		ret = zii_pic_eeprom_read_page(adev, page);
+		if (ret)
+			return ret;
+
+		memcpy(val, adev->eeprom_page + offset, count);
+
+		page++;
+		offset = 0;
+		bytes_left -= count;
+		val += count;
+	} while (bytes_left);
+
+	return 0;
+}
+
+int zii_pic_eeprom_write(struct device *pic_dev,
+			 u16 reg, const void *data, size_t size)
+{
+	struct zii_pic_mfd *adev = dev_get_drvdata(pic_dev);
+	int page = reg >> 5;
+	int offset = reg & 0x1f;
+	size_t bytes_left = size;
+	int ret;
+
+	pr_debug("%s: enter\n", __func__);
+
+	do {
+		int count = bytes_left > ZII_PIC_EEPROM_PAGE_SIZE ?
+			ZII_PIC_EEPROM_PAGE_SIZE : bytes_left;
+
+		if (unlikely(count + offset > ZII_PIC_EEPROM_PAGE_SIZE))
+			count -= offset;
+
+		if (count == ZII_PIC_EEPROM_PAGE_SIZE)
+			ret = zii_pic_eeprom_write_page(adev, page, data);
+		else {
+			ret = zii_pic_eeprom_read_page(adev, page);
+			if (ret)
+				return ret;
+
+			memcpy(adev->eeprom_page + offset, data, count);
+
+			ret = zii_pic_eeprom_write_page(adev, page, adev->eeprom_page);
+		}
+		if (ret)
+			return ret;
+
+		page++;
+		offset = 0;
+		bytes_left -= count;
+		data += count;
+
+	} while(bytes_left);
+
+	return 0;
 }
 
 

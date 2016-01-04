@@ -37,6 +37,8 @@
 #define zii_pic_esb_process_5v			zii_pic_niu_process_5v
 #define zii_pic_esb_process_3v3			zii_pic_niu_process_3v3
 #define zii_pic_esb_process_temperature		zii_pic_niu_process_temperature
+#define zii_pic_esb_process_eeprom_read		zii_pic_niu_process_eeprom_read
+#define zii_pic_esb_process_eeprom_write	zii_pic_niu_process_eeprom_write
 #define zii_pic_esb_process_firmware_version	zii_pic_niu_process_firmware_version
 #define zii_pic_esb_process_bootloader_version	zii_pic_niu_process_bootloader_version
 
@@ -65,6 +67,10 @@ struct pic_cmd_desc zii_pic_esb_cmds[ZII_PIC_CMD_COUNT] = {
 	{0x2F, 0, zii_pic_esb_process_3v3},
 	/* ZII_PIC_CMD_GET_TEMPERATURE */
 	{0x19, 0, zii_pic_esb_process_temperature},
+	/* ZII_PIC_CMD_EEPROM_READ */
+	{0x20, 3, zii_pic_esb_process_eeprom_read},
+	/* ZII_PIC_CMD_EEPROM_WRITE */
+	{0x20, 35, zii_pic_esb_process_eeprom_write},
 	/* ZII_PIC_CMD_GET_FIRMWARE_VERSION */
 	{0x11, 0, zii_pic_esb_process_firmware_version},
 	/* ZII_PIC_CMD_GET_BOOTLOADER_VERSION */

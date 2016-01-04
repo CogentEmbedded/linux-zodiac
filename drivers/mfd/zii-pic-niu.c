@@ -51,6 +51,10 @@ struct pic_cmd_desc zii_pic_niu_cmds[ZII_PIC_CMD_COUNT] = {
 	{0, 0, NULL},
 	/* ZII_PIC_CMD_GET_TEMPERATURE */
 	{0x19, 0, zii_pic_niu_process_temperature},
+	/* ZII_PIC_CMD_EEPROM_READ */
+	{0x20, 3, zii_pic_niu_process_eeprom_read},
+	/* ZII_PIC_CMD_EEPROM_WRITE */
+	{0x20, 35, zii_pic_niu_process_eeprom_write},
 	/* ZII_PIC_CMD_GET_FIRMWARE_VERSION */
 	{0x11, 0, zii_pic_niu_process_firmware_version},
 	/* ZII_PIC_CMD_GET_BOOTLOADER_VERSION */
@@ -63,6 +67,8 @@ int zii_pic_niu_process_status_response(struct zii_pic_mfd *adev,
 	struct pic_niu_status_info *status =
 			(struct pic_niu_status_info*)data;
 	int boot_device;
+
+	pr_debug("%s: enter\n", __func__);
 
 	/* bad response */
 	if (size != sizeof(*status))
@@ -117,8 +123,10 @@ int zii_pic_niu_process_status_response(struct zii_pic_mfd *adev,
 }
 
 int zii_pic_niu_process_watchdog_state(struct zii_pic_mfd *adev,
-				u8 *data, u8 size)
+		u8 *data, u8 size)
 {
+	pr_debug("%s: enter\n", __func__);
+
 	/* bad response */
 	if (size != 2)
 		return -EINVAL;
@@ -134,6 +142,8 @@ int zii_pic_niu_process_watchdog_state(struct zii_pic_mfd *adev,
 int zii_pic_niu_process_reset_reason(struct zii_pic_mfd *adev,
 		u8 *data, u8 size)
 {
+	pr_debug("%s: enter\n", __func__);
+
 	/* bad response, ignore */
 	if (size != 1)
 		return -EINVAL;
@@ -149,8 +159,10 @@ static inline int zii_pic_f88_to_int(u8 *data)
 }
 
 int zii_pic_niu_process_28v(struct zii_pic_mfd *adev,
-			    u8 *data, u8 size)
+		u8 *data, u8 size)
 {
+	pr_debug("%s: enter\n", __func__);
+
 	/* bad response, ignore */
 	if (size != 2)
 		return -EINVAL;
@@ -162,8 +174,10 @@ int zii_pic_niu_process_28v(struct zii_pic_mfd *adev,
 }
 
 int zii_pic_niu_process_12v(struct zii_pic_mfd *adev,
-			    u8 *data, u8 size)
+		u8 *data, u8 size)
 {
+	pr_debug("%s: enter\n", __func__);
+
 	/* bad response, ignore */
 	if (size != 2)
 		return -EINVAL;
@@ -175,8 +189,10 @@ int zii_pic_niu_process_12v(struct zii_pic_mfd *adev,
 }
 
 int zii_pic_niu_process_5v(struct zii_pic_mfd *adev,
-			   u8 *data, u8 size)
+		u8 *data, u8 size)
 {
+	pr_debug("%s: enter\n", __func__);
+
 	/* bad response, ignore */
 	if (size != 2)
 		return -EINVAL;
@@ -188,8 +204,10 @@ int zii_pic_niu_process_5v(struct zii_pic_mfd *adev,
 }
 
 int zii_pic_niu_process_3v3(struct zii_pic_mfd *adev,
-			    u8 *data, u8 size)
+		u8 *data, u8 size)
 {
+	pr_debug("%s: enter\n", __func__);
+
 	/* bad response, ignore */
 	if (size != 2)
 		return -EINVAL;
@@ -201,8 +219,10 @@ int zii_pic_niu_process_3v3(struct zii_pic_mfd *adev,
 }
 
 int zii_pic_niu_process_temperature(struct zii_pic_mfd *adev,
-				    u8 *data, u8 size)
+		u8 *data, u8 size)
 {
+	pr_debug("%s: enter\n", __func__);
+
 	/* bad response, ignore */
 	if (size != 2)
 		return -EINVAL;
@@ -214,8 +234,10 @@ int zii_pic_niu_process_temperature(struct zii_pic_mfd *adev,
 }
 
 int zii_pic_niu_process_firmware_version(struct zii_pic_mfd *adev,
-				u8 *data, u8 size)
+		u8 *data, u8 size)
 {
+	pr_debug("%s: enter\n", __func__);
+
 	/* bad response, ignore */
 	if (size != sizeof(struct pic_version))
 		return -EINVAL;
@@ -226,14 +248,55 @@ int zii_pic_niu_process_firmware_version(struct zii_pic_mfd *adev,
 	return 0;
 }
 int zii_pic_niu_process_bootloader_version(struct zii_pic_mfd *adev,
-				u8 *data, u8 size)
+		u8 *data, u8 size)
 {
+	pr_debug("%s: enter\n", __func__);
+
 	/* bad response, ignore */
 	if (size != sizeof(struct pic_version))
 		return -EINVAL;
 
 	/* convert to millidegree Celsius */
 	memcpy(&adev->bootloader_version, data, size);
+
+	return 0;
+}
+
+int zii_pic_niu_process_eeprom_read(struct zii_pic_mfd *adev,
+				u8 *data, u8 size)
+{
+	pr_debug("%s: enter\n", __func__);
+
+	/* bad response, ignore */
+	if (size != 2 + ZII_PIC_EEPROM_PAGE_SIZE)
+		return -EINVAL;
+
+	/* check operation status */
+	if (!data[1])
+		return -EIO;
+
+#ifdef DEBUG
+	print_hex_dump(KERN_DEBUG, "eeprom data: ", DUMP_PREFIX_OFFSET,
+			16, 1, &data[2], ZII_PIC_EEPROM_PAGE_SIZE, true);
+#endif
+
+	memcpy(adev->eeprom_page, &data[2], ZII_PIC_EEPROM_PAGE_SIZE);
+
+	return 0;
+}
+
+int zii_pic_niu_process_eeprom_write(struct zii_pic_mfd *adev,
+				u8 *data, u8 size)
+{
+	pr_debug("%s: enter\n", __func__);
+
+	/* bad response, ignore */
+	if (size != 2)
+		return -EINVAL;
+
+	/* check operation status */
+	if (!data[1])
+		return -EIO;
 
 	return 0;
 }

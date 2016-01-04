@@ -3,6 +3,7 @@
 
 #define ZII_PIC_DRVNAME_WATCHDOG	"pic-watchdog"
 #define ZII_PIC_DRVNAME_HWMON		"pic-hwmon"
+#define ZII_PIC_DRVNAME_EEPROM		"pic-eeprom"
 
 #define ZII_PIC_DEFAULT_BAUD_RATE	57600
 
@@ -24,6 +25,10 @@ enum zii_pic_cmd_id {
 	ZII_PIC_CMD_GET_5V_READING,
 	ZII_PIC_CMD_GET_3V3_READING,
 	ZII_PIC_CMD_GET_TEMPERATURE,
+
+	/* Main EEPROM */
+	ZII_PIC_CMD_EEPROM_READ,
+	ZII_PIC_CMD_EEPROM_WRITE,
 
 	/* Board specific variants */
 	ZII_PIC_CMD_GET_FIRMWARE_VERSION,
@@ -70,6 +75,13 @@ enum zii_pic_sensor {
 
 int zii_pic_hwmon_read_sensor(struct device *pic_dev,
 				enum zii_pic_sensor id, int *val);
+
+/* EEPROM API */
+int zii_pic_eeprom_read(struct device *pic_dev,
+		u16 reg, void *val, size_t val_size);
+
+int zii_pic_eeprom_write(struct device *pic_dev,
+			 u16 reg, const void *data, size_t size);
 
 
 #endif /* _LINUX_ZII_PIC_H_ */

@@ -5,6 +5,8 @@
 #include <linux/zii-pic.h>
 #include <linux/n_mcu.h>
 
+#define ZII_PIC_EEPROM_PAGE_SIZE 32
+
 enum pic_state {
 	PIC_STATE_UNKNOWN,
 	PIC_STATE_OPENED,
@@ -60,6 +62,8 @@ struct zii_pic_mfd {
 
 	struct pic_version		bootloader_version;
 	struct pic_version		firmware_version;
+
+	u8				eeprom_page[ZII_PIC_EEPROM_PAGE_SIZE];
 
 	int (*uart_open)(struct tty_struct * tty, struct file * filp);
 };

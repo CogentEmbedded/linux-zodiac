@@ -44,6 +44,10 @@ int zii_pic_niu_process_firmware_version(struct zii_pic_mfd *adev,
 				u8 *data, u8 size);
 int zii_pic_niu_process_bootloader_version(struct zii_pic_mfd *adev,
 				u8 *data, u8 size);
+int zii_pic_niu_process_eeprom_read(struct zii_pic_mfd *adev,
+				u8 *data, u8 size);
+int zii_pic_niu_process_eeprom_write(struct zii_pic_mfd *adev,
+				u8 *data, u8 size);
 
 extern struct pic_cmd_desc zii_pic_niu_cmds[ZII_PIC_CMD_COUNT];
 
