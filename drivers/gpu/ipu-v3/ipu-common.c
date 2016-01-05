@@ -1062,10 +1062,11 @@ static int ipu_add_client_devices(struct ipu_soc *ipu, unsigned long ipu_base)
 		/* Associate subdevice with the corresponding port node */
 		pdev->dev.of_node = of_graph_get_port_by_id(dev->of_node, i);
 		if (!pdev->dev.of_node) {
-			dev_err(dev, "missing port@%d node in %s\n", i,
-				dev->of_node->full_name);
-			ret = -ENODEV;
-			goto err_register;
+			dev_info(dev,
+				 "no port@%d node in %s, not using %s%d\n",
+				 i, dev->of_node->full_name,
+				 (i / 2) ? "DI" : "CSI", i % 2);
+			continue;
 		}
 
 		ret = platform_device_add_data(pdev, &reg->pdata,
