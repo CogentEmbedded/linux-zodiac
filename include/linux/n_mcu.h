@@ -16,10 +16,15 @@ struct n_mcu_cmd {
 	__u8	data[N_MCU_MAX_CMD_SIZE];
 } __packed;
 
+typedef void (*event_callback_t)(void *, struct n_mcu_cmd*);
+
 struct n_mcu_ops {
 	int (*cmd)(struct n_mcu_cmd *);
 	int (*cmd_no_response)(struct n_mcu_cmd *);
-	void (*event)(struct n_mcu_cmd *);
+	int (*event_response)(struct n_mcu_cmd *);
+
+	event_callback_t event;
+	void *callback_cookie;
 };
 
 #define N_MCU_SET_CHECKSUM_TYPE	_IOW (N_MCU_IO, 0, unsigned int)

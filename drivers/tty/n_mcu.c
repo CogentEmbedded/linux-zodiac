@@ -75,7 +75,8 @@ struct n_mcu_priv {
 	bool	(*validate_checksum)(const u8 const *data, size_t len);
 
 	void	(*response)(struct n_mcu_cmd *);
-	void	(*event)(struct n_mcu_cmd *);
+	event_callback_t	event;
+	void 			*callback_cookie;
 };
 
 static struct n_mcu_priv n_mcu_priv;
@@ -84,8 +85,8 @@ static DEFINE_SPINLOCK(n_mcu_tx_lock);
 
 static void n_mcu_put_data(const u8 const *data,
 		size_t len, u8 *out, size_t *out_idx);
-static void n_mcu_event_response(void);
-
+static void n_mcu_handle_event(void);
+static int n_mcu_event_response(struct n_mcu_cmd *cmd);
 
 
 static void n_mcu_add_checksum_crc16(const u8 const *data,
@@ -239,6 +240,7 @@ static void n_mcu_handle_msg(struct n_mcu_priv *priv)
 		goto out;
 	}
 
+	pr_debug("%s: checksum ok\n", __func__);
 	/* this is cmd response */
 	if (atomic_read(&n_mcu_priv.transfer_in_progress)) {
 		if (!completion_done(&priv->cmd_complete))
@@ -247,9 +249,10 @@ static void n_mcu_handle_msg(struct n_mcu_priv *priv)
 	}
 
 	/* otherwise it is event from MCU */
-	n_mcu_event_response();
+	n_mcu_handle_event();
 out:
 	atomic_set(&n_mcu_priv.transfer_in_progress, 0);
+	atomic_set(&n_mcu_priv.rx_ready, 1);
 }
 
 static void n_mcu_parse_data(struct n_mcu_priv *priv,
@@ -327,8 +330,6 @@ int n_mcu_send_frame(struct n_mcu_priv *priv)
 		frame += ret;
 	};
 
-	atomic_set(&n_mcu_priv.rx_ready, 1);
-
 	return 0;
 }
 
@@ -374,8 +375,10 @@ start:
 		}
 		/* else it is failed due to checksum validation,
 		 * fallback to retry loop */
-	} else
+	} else {
 		atomic_set(&n_mcu_priv.transfer_in_progress, 0);
+		atomic_set(&n_mcu_priv.rx_ready, 1);
+	}
 
 	if (--retry_count)
 		goto start;
@@ -385,6 +388,7 @@ start:
 out:
 	if (ret) {
 		atomic_set(&n_mcu_priv.transfer_in_progress, 0);
+		atomic_set(&n_mcu_priv.rx_ready, 1);
 		spin_unlock(&n_mcu_tx_lock);
 	}
 
@@ -415,17 +419,19 @@ static int n_mcu_execute_cmd_no_response(struct n_mcu_cmd* cmd)
 	ret = n_mcu_send_frame(&n_mcu_priv);
 
 err:
-	if (ret)
+	if (ret) {
 		atomic_set(&n_mcu_priv.transfer_in_progress, 0);
-
+		atomic_set(&n_mcu_priv.rx_ready, 1);
+	}
 	spin_unlock(&n_mcu_tx_lock);
 	return ret;
 }
 
-static void n_mcu_event_response(void)
+static void n_mcu_handle_event(void)
 {
 	struct n_mcu_cmd cmd;
-	int ret;
+
+	pr_debug("%s: enter\n", __func__);
 
 start:
 	wait_event(n_mcu_priv.wait,
@@ -441,10 +447,33 @@ start:
 	cmd.size = n_mcu_priv.rx_data_size;
 	memcpy(cmd.data, n_mcu_priv.rx_data, n_mcu_priv.rx_data_size);
 
-	if (!n_mcu_priv.event)
-		n_mcu_priv.event(&cmd);
+	atomic_set(&n_mcu_priv.transfer_in_progress, 0);
+	atomic_set(&n_mcu_priv.rx_ready, 1);
 
-	ret = n_mcu_prepare_frame(&n_mcu_priv, cmd.data, cmd.size);
+	spin_unlock(&n_mcu_tx_lock);
+
+	if (n_mcu_priv.event)
+		n_mcu_priv.event(n_mcu_priv.callback_cookie, &cmd);
+
+}
+
+static int n_mcu_event_response(struct n_mcu_cmd *cmd)
+{
+	int ret;
+
+	pr_debug("%s: enter\n", __func__);
+start:
+	wait_event(n_mcu_priv.wait,
+		   !atomic_read(&n_mcu_priv.transfer_in_progress));
+
+	spin_lock(&n_mcu_tx_lock);
+
+	if (atomic_cmpxchg(&n_mcu_priv.transfer_in_progress, 0, 1)) {
+		spin_unlock(&n_mcu_tx_lock);
+		goto start;
+	}
+
+	ret = n_mcu_prepare_frame(&n_mcu_priv, cmd->data, cmd->size);
 	if (ret)
 		goto out;
 
@@ -453,20 +482,29 @@ start:
 		goto out;
 
 out:
+	atomic_set(&n_mcu_priv.transfer_in_progress, 0);
+	atomic_set(&n_mcu_priv.rx_ready, 1);
+
 	spin_unlock(&n_mcu_tx_lock);
+
+	return ret;
 }
 
 static int n_mcu_configure_ops(struct n_mcu_priv *priv,
 		struct n_mcu_ops* ops)
 {
+	pr_debug("%s: enter\n", __func__);
+
 	mutex_lock(&n_mcu_lock);
 
 	/* provide cmd execution calls to client */
 	ops->cmd = n_mcu_execute_cmd;
 	ops->cmd_no_response = n_mcu_execute_cmd_no_response;
+	ops->event_response = n_mcu_event_response;
 
 	/* callbacks from client */
 	priv->event = ops->event;
+	priv->callback_cookie = ops->callback_cookie;
 
 	mutex_unlock(&n_mcu_lock);
 
@@ -497,6 +535,8 @@ static int n_mcu_open(struct tty_struct *tty)
 
 		init_waitqueue_head(&n_mcu_priv.wait);
 		init_completion(&n_mcu_priv.cmd_complete);
+
+		atomic_set(&n_mcu_priv.rx_ready, 1);
 
 		ret = 0;
 
@@ -560,7 +600,7 @@ static void n_mcu_receive(struct tty_struct *tty, const u8 *data,
 	WARN_ON(priv->tty != n_mcu_priv.tty);
 
 #ifdef DEBUG
-	print_hex_dump(KERN_DEBUG, "received data: ", DUMP_PREFIX_OFFSET,
+	print_hex_dump(KERN_DEBUG, "n_mcu_receive: data: ", DUMP_PREFIX_OFFSET,
 			16, 1, data, count, true);
 #endif
 

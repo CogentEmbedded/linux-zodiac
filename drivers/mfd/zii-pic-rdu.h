@@ -3,6 +3,12 @@
 
 #include "zii-pic-core.h"
 
+#define		PIC_RDU_EVENT_BUTTON_PRESS	0xE0
+#define 	PIC_RDU_RESPONSE_BUTTON_PRESS	0xE1
+#define		PIC_RDU_EVENT_ORIENTATION	0xE2
+#define 	PIC_RDU_RESPONSE_ORIENTATION	0xE3
+
+
 struct pic_rdu_status_info {
 	u8	bl_part_num_hw;
 	u16	bl_part_num_major_ver;
@@ -25,7 +31,7 @@ struct pic_rdu_status_info {
 	u8	bk[3];
 	u8	cs;
 	u8	hs;
-	u16	v;
+	u8	v[2];
 	u8	ib;
 	u8	ps;
 	u8	gs;
@@ -41,6 +47,18 @@ int zii_pic_rdu_process_status_response(struct zii_pic_mfd *adev,
 
 int zii_pic_rdu_process_reset_reason(struct zii_pic_mfd *adev,
 					u8 *data, u8 size);
+
+int zii_pic_rdu_process_dds_eeprom_read(struct zii_pic_mfd *adev,
+				u8 *data, u8 size);
+
+int zii_pic_rdu_process_dds_eeprom_write(struct zii_pic_mfd *adev,
+				u8 *data, u8 size);
+
+void zii_pic_rdu_event_handler(struct zii_pic_mfd *adev,
+		struct n_mcu_cmd *event);
+
+int zii_pic_rdu_hwmon_read_sensor(struct zii_pic_mfd *adev,
+			enum zii_pic_sensor id, int *val);
 
 extern struct pic_cmd_desc zii_pic_rdu_cmds[ZII_PIC_CMD_COUNT];
 

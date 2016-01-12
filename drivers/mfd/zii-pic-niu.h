@@ -49,6 +49,9 @@ int zii_pic_niu_process_eeprom_read(struct zii_pic_mfd *adev,
 int zii_pic_niu_process_eeprom_write(struct zii_pic_mfd *adev,
 				u8 *data, u8 size);
 
+int zii_pic_niu_hwmon_read_sensor(struct zii_pic_mfd *adev,
+			enum zii_pic_sensor id, int *val);
+
 extern struct pic_cmd_desc zii_pic_niu_cmds[ZII_PIC_CMD_COUNT];
 
 #endif /* _LINUX_ZII_PIC_NIU_H_ */

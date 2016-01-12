@@ -59,6 +59,10 @@ struct pic_cmd_desc zii_pic_niu_cmds[ZII_PIC_CMD_COUNT] = {
 	{0x11, 0, zii_pic_niu_process_firmware_version},
 	/* ZII_PIC_CMD_GET_BOOTLOADER_VERSION */
 	{0x12, 0, zii_pic_niu_process_bootloader_version},
+	/* ZII_PIC_CMD_DDS_EEPROM_READ */
+	{0, 0, NULL},
+	/* ZII_PIC_CMD_DDS_EEPROM_WRITE */
+	{0, 0, NULL},
 };
 
 int zii_pic_niu_process_status_response(struct zii_pic_mfd *adev,
@@ -151,11 +155,6 @@ int zii_pic_niu_process_reset_reason(struct zii_pic_mfd *adev,
 	adev->reset_reason = *data;
 
 	return 0;
-}
-
-static inline int zii_pic_f88_to_int(u8 *data)
-{
-	return data[1] * 1000 + (data[0] * 1000 >> 8);
 }
 
 int zii_pic_niu_process_28v(struct zii_pic_mfd *adev,
@@ -276,7 +275,7 @@ int zii_pic_niu_process_eeprom_read(struct zii_pic_mfd *adev,
 		return -EIO;
 
 #ifdef DEBUG
-	print_hex_dump(KERN_DEBUG, "eeprom data: ", DUMP_PREFIX_OFFSET,
+	print_hex_dump(KERN_DEBUG, "EEPROM data: ", DUMP_PREFIX_OFFSET,
 			16, 1, &data[2], ZII_PIC_EEPROM_PAGE_SIZE, true);
 #endif
 
@@ -299,5 +298,52 @@ int zii_pic_niu_process_eeprom_write(struct zii_pic_mfd *adev,
 		return -EIO;
 
 	return 0;
+}
+
+int zii_pic_niu_hwmon_read_sensor(struct zii_pic_mfd *adev,
+			enum zii_pic_sensor id, int *val)
+{
+	int ret;
+
+	switch (id) {
+	case ZII_PIC_SENSOR_28V:
+		ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_GET_28V_READING, NULL, 0);
+		if (ret)
+			break;
+		*val = adev->sensor_28v;
+		break;
+
+	case ZII_PIC_SENSOR_12V:
+		ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_GET_12V_READING, NULL, 0);
+		if (ret)
+			break;
+		*val = adev->sensor_12v;
+		break;
+
+	case ZII_PIC_SENSOR_5V:
+		ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_GET_5V_READING, NULL, 0);
+		if (ret)
+			break;
+		*val = adev->sensor_5v;
+		break;
+
+	case ZII_PIC_SENSOR_3V3:
+		ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_GET_3V3_READING, NULL, 0);
+		if (ret)
+			break;
+		*val = adev->sensor_3v3;
+		break;
+
+	case ZII_PIC_SENSOR_TEMPERATURE:
+		ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_GET_TEMPERATURE, NULL, 0);
+		if (ret)
+			break;
+		*val = adev->temperature;
+		break;
+
+	default:
+		BUG();
+	}
+	return ret;
 }
 

@@ -23,6 +23,8 @@
 #include <linux/device.h>
 #include <linux/module.h>
 #include <linux/nvmem-provider.h>
+#include <linux/of.h>
+#include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
 #include <linux/zii-pic.h>
@@ -30,10 +32,16 @@
 struct zii_pic_eeprom {
 	struct device *pic_dev;
 	struct nvmem_device *nvmem;
+	enum zii_pic_eeprom_type eeprom_type;
 };
 
-static struct nvmem_config econfig = {
-	.name = "zii-pic-eeprom",
+struct zii_pic_eeprom_info {
+	const char 			*name;
+	enum zii_pic_eeprom_type	eeprom_type;
+	struct regmap_config*		regmap_config;
+};
+
+static struct nvmem_config eeprom_config = {
 	.owner = THIS_MODULE,
 };
 
@@ -49,7 +57,8 @@ static int zii_pic_eeprom_bus_read(void *context,
 	if (reg_size != 2)
 		return -ENOTSUPP;
 
-	return zii_pic_eeprom_read(adev->pic_dev, *(u16*)reg, val, val_size);
+	return zii_pic_eeprom_read(adev->pic_dev, adev->eeprom_type,
+			*(u16*)reg, val, val_size);
 }
 
 static int zii_pic_eeprom_bus_write(void *context,
@@ -61,7 +70,8 @@ static int zii_pic_eeprom_bus_write(void *context,
 
 	pr_debug("%s: enter\n", __func__);
 
-	return zii_pic_eeprom_write(adev->pic_dev, *p, p+1, count - sizeof(*p));
+	return zii_pic_eeprom_write(adev->pic_dev,  adev->eeprom_type,
+			*p, p+1, count - sizeof(*p));
 }
 
 static struct regmap_bus zii_pic_eeprom_bus = {
@@ -70,37 +80,72 @@ static struct regmap_bus zii_pic_eeprom_bus = {
 	.reg_format_endian_default = REGMAP_ENDIAN_NATIVE,
 };
 
-static struct regmap_config zii_pic_eeprom_regmap_config = {
+static struct regmap_config zii_pic_main_eeprom_regmap_config = {
 	.reg_bits = 16,
 	.val_bits = 8,
 	.reg_stride = 1,
 	.max_register = 0x3FFF,
 };
 
+static struct regmap_config zii_pic_dds_eeprom_regmap_config = {
+	.reg_bits = 16,
+	.val_bits = 8,
+	.reg_stride = 1,
+	.max_register = 0x1FFF,
+};
+
+static const struct zii_pic_eeprom_info zii_pic_main_eeprom_info = {
+	.name = ZII_PIC_NAME_MAIN_EEPROM,
+	.eeprom_type = MAIN_EEPROM,
+	.regmap_config = &zii_pic_main_eeprom_regmap_config,
+};
+
+static const struct zii_pic_eeprom_info zii_pic_dds_eeprom_info = {
+	.name = ZII_PIC_NAME_DDS_EEPROM,
+	.eeprom_type = DDS_EEPROM,
+	.regmap_config = &zii_pic_dds_eeprom_regmap_config,
+};
+
+static const struct of_device_id zii_pic_eeprom_of_match[] = {
+	{ .compatible = "zii,pic-main-eeprom", .data = &zii_pic_main_eeprom_info},
+	{ .compatible = "zii,pic-dds-eeprom", .data = &zii_pic_dds_eeprom_info},
+	{}
+};
+
 static int zii_pic_eeprom_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
-	struct regmap *regmap;
 	struct zii_pic_eeprom *adev;
+	struct regmap *regmap;
+	const struct of_device_id *id;
+	struct zii_pic_eeprom_info *info;
 
-	pr_debug("%s: enter\n", __func__);
+	pr_debug("%s: enter: node %s\n", __func__, dev->of_node->name);
 
-	adev = devm_kzalloc(dev, sizeof(*adev), GFP_KERNEL);
-	if (!adev)
-		return -ENOMEM;
+	id = of_match_device(zii_pic_eeprom_of_match, dev);
+	if (!id)
+		return -ENODEV;
 
-	regmap = devm_regmap_init(dev, &zii_pic_eeprom_bus, dev,
-				  &zii_pic_eeprom_regmap_config);
+	info = (struct zii_pic_eeprom_info *)id->data;
+
+	regmap = devm_regmap_init(dev, &zii_pic_eeprom_bus,
+			dev, info->regmap_config);
 	if (IS_ERR(regmap)) {
 		pr_err("%s: regmap init failed (err = %ld)\n",
 			__func__, PTR_ERR(regmap));
 		return PTR_ERR(regmap);
 	}
 
-	adev->pic_dev = pdev->dev.parent;
+	adev = devm_kzalloc(dev, sizeof(*adev), GFP_KERNEL);
+	if (!adev)
+		return -ENOMEM;
 
-	econfig.dev = dev;
-	adev->nvmem = nvmem_register(&econfig);
+	adev->pic_dev = dev->parent;
+	adev->eeprom_type = info->eeprom_type;
+
+	eeprom_config.name = info->name;
+	eeprom_config.dev = dev;
+	adev->nvmem = nvmem_register(&eeprom_config);
 	if (IS_ERR(adev->nvmem)) {
 		pr_err("%s: nvmem register failed (err = %ld)\n",
 			__func__, PTR_ERR(adev->nvmem));
@@ -123,11 +168,13 @@ static struct platform_driver zii_pic_eeprom_driver = {
 	.probe = zii_pic_eeprom_probe,
 	.remove = zii_pic_eeprom_remove,
 	.driver = {
-		.name = ZII_PIC_DRVNAME_EEPROM,
+		.name = ZII_PIC_NAME_EEPROM,
+		.of_match_table = zii_pic_eeprom_of_match,
 	},
 };
 module_platform_driver(zii_pic_eeprom_driver);
 
+MODULE_DEVICE_TABLE(of, zii_pic_eeprom_of_match);
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Andrey Vostrikov <andrey.vostrikov@cogentembedded.com>");
 MODULE_DESCRIPTION("ZII PIC EEPROM driver");

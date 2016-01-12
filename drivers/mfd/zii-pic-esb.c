@@ -75,4 +75,8 @@ struct pic_cmd_desc zii_pic_esb_cmds[ZII_PIC_CMD_COUNT] = {
 	{0x11, 0, zii_pic_esb_process_firmware_version},
 	/* ZII_PIC_CMD_GET_BOOTLOADER_VERSION */
 	{0x12, 0, zii_pic_esb_process_bootloader_version},
+	/* ZII_PIC_CMD_DDS_EEPROM_READ */
+	{0, 0, NULL},
+	/* ZII_PIC_CMD_DDS_EEPROM_WRITE */
+	{0, 0, NULL},
 };

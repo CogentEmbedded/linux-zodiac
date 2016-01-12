@@ -23,6 +23,7 @@
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/kernel.h>
+#include <linux/nvmem-consumer.h>
 #include <linux/platform_device.h>
 #include <linux/reboot.h>
 #include <linux/watchdog.h>
@@ -123,6 +124,7 @@ static int zii_pic_wdt_restart_handler(struct notifier_block *this,
 static int zii_pic_wdt_probe(struct platform_device *pdev)
 {
 	struct zii_pic_wdt *adev;
+	struct nvmem_cell *cell;
 	int ret;
 
 	pr_debug("%s: enter: dev->parent: %p\n", __func__, pdev->dev.parent);
@@ -141,10 +143,27 @@ static int zii_pic_wdt_probe(struct platform_device *pdev)
 
 	adev->wdt.info = &zii_pic_wdt_info;
 	adev->wdt.ops = &zii_pic_wdt_ops;
-	adev->wdt.timeout = ZII_PIC_WDT_DEFAULT_TIMEOUT;
 	adev->wdt.min_timeout = ZII_PIC_WDT_MIN_TIMEOUT;
 	adev->wdt.max_timeout = ZII_PIC_WDT_MAX_TIMEOUT;
 	adev->wdt.status = WATCHDOG_NOWAYOUT_INIT_STATUS;
+
+	cell = devm_nvmem_cell_get(&pdev->dev, "wdt_timeout");
+	if (IS_ERR(cell)) {
+		pr_warn("%s: unable to get WDT Timeout from EEPROM\n", __func__);
+		adev->wdt.timeout = ZII_PIC_WDT_DEFAULT_TIMEOUT;
+	} else {
+		void *value;
+		size_t cell_len;
+
+		value = nvmem_cell_read(cell, &cell_len);
+		if (!IS_ERR(value)) {
+			adev->wdt.timeout = *(u16*)value;
+
+			pr_debug("Using WDT timeout from EEPROM: %d\n",
+				adev->wdt.timeout);
+		}
+		devm_nvmem_cell_put(&pdev->dev, cell);
+	}
 
 	watchdog_set_drvdata(&adev->wdt, adev);
 	dev_set_drvdata(&pdev->dev, adev);
@@ -180,7 +199,7 @@ static struct platform_driver zii_pic_wdt_driver = {
 	.probe = zii_pic_wdt_probe,
 	.remove = zii_pic_wdt_remove,
 	.driver = {
-		.name = ZII_PIC_DRVNAME_WATCHDOG,
+		.name = ZII_PIC_NAME_WATCHDOG,
 	},
 };
 

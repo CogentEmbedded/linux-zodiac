@@ -65,16 +65,20 @@ const static struct of_device_id zii_pic_mfd_dt_ids[] = {
 
 static const struct mfd_cell zii_pic_devices[] = {
 	{
+		.of_compatible = "zii,pic-main-eeprom",
+		.name = ZII_PIC_NAME_MAIN_EEPROM,
+	},
+	{
+		.of_compatible = "zii,pic-dds-eeprom",
+		.name = ZII_PIC_NAME_DDS_EEPROM,
+	},
+	{
 		.of_compatible = "zii,pic-watchdog",
-		.name = ZII_PIC_DRVNAME_WATCHDOG,
+		.name = ZII_PIC_NAME_WATCHDOG,
 	},
 	{
 		.of_compatible = "zii,pic-hwmon",
-		.name = ZII_PIC_DRVNAME_HWMON,
-	},
-	{
-		.of_compatible = "zii,pic-eeprom",
-		.name = ZII_PIC_DRVNAME_EEPROM,
+		.name = ZII_PIC_NAME_HWMON,
 	},
 };
 
@@ -94,12 +98,27 @@ static int zii_pic_device_added(struct uart_slave *slave)
 	return 0;
 }
 
-static void zii_pic_event_handler(struct n_mcu_cmd *event)
+static void zii_pic_event_handler(void *cookie, struct n_mcu_cmd *event)
 {
+	struct zii_pic_mfd *adev = cookie;
+
 	pr_debug("%s: enter\n", __func__);
+
+#ifdef DEBUG
+	print_hex_dump(KERN_DEBUG, "event data: ", DUMP_PREFIX_OFFSET,
+			16, 1, event->data, event->size, true);
+#endif
+
+	switch (adev->hw_id) {
+	case PIC_HW_ID_RDU:
+		zii_pic_rdu_event_handler(adev, event);
+		break;
+	default:
+		BUG();
+	}
 }
 
-static int zii_pic_mcu_cmd(struct zii_pic_mfd *adev,
+int zii_pic_mcu_cmd(struct zii_pic_mfd *adev,
 		enum zii_pic_cmd_id id, const u8 * const data, u8 data_size)
 {
 	struct n_mcu_cmd mcu_cmd;
@@ -515,7 +534,7 @@ static int zii_pic_mfd_probe(struct device *dev)
 	else
 		adev->baud = baud;
 	adev->mcu_ops.event = zii_pic_event_handler;
-
+	adev->mcu_ops.callback_cookie = adev;
 	slave->device_added = zii_pic_device_added;
 
 	adev->uart_open = slave->ops.open;
@@ -685,40 +704,15 @@ int zii_pic_hwmon_read_sensor(struct device *pic_dev,
 
 	pr_debug("%s: enter\n", __func__);
 
-	switch (id) {
-	case ZII_PIC_SENSOR_28V:
-		ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_GET_28V_READING, NULL, 0);
-		if (ret)
-			break;
-		*val = adev->sensor_28v;
+	switch (adev->hw_id) {
+	case PIC_HW_ID_NIU:
+	case PIC_HW_ID_MEZZ:
+	case PIC_HW_ID_ESB:
+		ret = zii_pic_niu_hwmon_read_sensor(adev, id, val);
 		break;
 
-	case ZII_PIC_SENSOR_12V:
-		ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_GET_12V_READING, NULL, 0);
-		if (ret)
-			break;
-		*val = adev->sensor_12v;
-		break;
-
-	case ZII_PIC_SENSOR_5V:
-		ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_GET_5V_READING, NULL, 0);
-		if (ret)
-			break;
-		*val = adev->sensor_5v;
-		break;
-
-	case ZII_PIC_SENSOR_3V3:
-		ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_GET_3V3_READING, NULL, 0);
-		if (ret)
-			break;
-		*val = adev->sensor_3v3;
-		break;
-
-	case ZII_PIC_SENSOR_TEMPERATURE:
-		ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_GET_TEMPERATURE, NULL, 0);
-		if (ret)
-			break;
-		*val = adev->temperature;
+	case PIC_HW_ID_RDU:
+		ret = zii_pic_rdu_hwmon_read_sensor(adev, id, val);
 		break;
 
 	default:
@@ -729,24 +723,54 @@ int zii_pic_hwmon_read_sensor(struct device *pic_dev,
 }
 
 static int zii_pic_eeprom_read_page(struct zii_pic_mfd *adev,
-				    u16 page)
+		enum zii_pic_eeprom_type type, u16 page)
 {
-	u8 cmd_data[3] = {1, page & 0xFF, page >> 8};
-	return zii_pic_mcu_cmd(adev, ZII_PIC_CMD_EEPROM_READ,
-			      cmd_data, sizeof(cmd_data));
+	switch(type) {
+	case MAIN_EEPROM:
+	{
+		u8 cmd_data[3] = {1, page & 0xFF, page >> 8};
+		return zii_pic_mcu_cmd(adev, ZII_PIC_CMD_EEPROM_READ,
+				cmd_data, sizeof(cmd_data));
+	}
+	case DDS_EEPROM:
+	{
+		u8 cmd_data[2] = {1, page & 0xFF};
+		return zii_pic_mcu_cmd(adev, ZII_PIC_CMD_DDS_EEPROM_READ,
+				cmd_data, sizeof(cmd_data));
+	}
+	default:
+		BUG();
+	}
+	return 0;
 }
 
 static int zii_pic_eeprom_write_page(struct zii_pic_mfd *adev,
-				     u16 page, const u8 *data)
+		enum zii_pic_eeprom_type type, u16 page, const u8 *data)
 {
-	u8 cmd_data[35] = {0, page & 0xFF, page >> 8};
-	memcpy(&cmd_data[3], data, ZII_PIC_EEPROM_PAGE_SIZE);
-	return zii_pic_mcu_cmd(adev, ZII_PIC_CMD_EEPROM_WRITE,
-			      cmd_data, sizeof(cmd_data));
+	switch(type) {
+	case MAIN_EEPROM:
+	{
+		u8 cmd_data[35] = {0, page & 0xFF, page >> 8};
+		memcpy(&cmd_data[3], data, ZII_PIC_EEPROM_PAGE_SIZE);
+		return zii_pic_mcu_cmd(adev, ZII_PIC_CMD_EEPROM_WRITE,
+				cmd_data, sizeof(cmd_data));
+	}
+	case DDS_EEPROM:
+	{
+		u8 cmd_data[34] = {0, page & 0xFF};
+		memcpy(&cmd_data[2], data, ZII_PIC_EEPROM_PAGE_SIZE);
+		return zii_pic_mcu_cmd(adev, ZII_PIC_CMD_DDS_EEPROM_WRITE,
+				cmd_data, sizeof(cmd_data));
+	}
+	default:
+		BUG();
+	}
+	return 0;
 }
 
 int zii_pic_eeprom_read(struct device *pic_dev,
-		u16 reg, void *val, size_t val_size)
+		enum zii_pic_eeprom_type type, u16 reg,
+		void *val, size_t val_size)
 {
 	struct zii_pic_mfd *adev = dev_get_drvdata(pic_dev);
 	int page = reg >> 5;
@@ -763,10 +787,11 @@ int zii_pic_eeprom_read(struct device *pic_dev,
 		if (unlikely(count + offset > ZII_PIC_EEPROM_PAGE_SIZE))
 			count -= offset;
 
-		ret = zii_pic_eeprom_read_page(adev, page);
+		ret = zii_pic_eeprom_read_page(adev, type, page);
 		if (ret)
 			return ret;
 
+		pr_debug("%s: returning %d bytes from %d\n", __func__, count, val_size);
 		memcpy(val, adev->eeprom_page + offset, count);
 
 		page++;
@@ -779,7 +804,8 @@ int zii_pic_eeprom_read(struct device *pic_dev,
 }
 
 int zii_pic_eeprom_write(struct device *pic_dev,
-			 u16 reg, const void *data, size_t size)
+		enum zii_pic_eeprom_type type, u16 reg,
+		const void *data, size_t size)
 {
 	struct zii_pic_mfd *adev = dev_get_drvdata(pic_dev);
 	int page = reg >> 5;
@@ -797,15 +823,16 @@ int zii_pic_eeprom_write(struct device *pic_dev,
 			count -= offset;
 
 		if (count == ZII_PIC_EEPROM_PAGE_SIZE)
-			ret = zii_pic_eeprom_write_page(adev, page, data);
+			ret = zii_pic_eeprom_write_page(adev, type, page, data);
 		else {
-			ret = zii_pic_eeprom_read_page(adev, page);
+			ret = zii_pic_eeprom_read_page(adev, type, page);
 			if (ret)
 				return ret;
 
 			memcpy(adev->eeprom_page + offset, data, count);
 
-			ret = zii_pic_eeprom_write_page(adev, page, adev->eeprom_page);
+			ret = zii_pic_eeprom_write_page(adev, type,
+					page, adev->eeprom_page);
 		}
 		if (ret)
 			return ret;

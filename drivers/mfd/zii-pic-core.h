@@ -48,17 +48,20 @@ struct zii_pic_mfd {
 	struct tty_struct		*tty;
 	speed_t				baud;
 
-	/* cached watchdog state */
 	u8				watchdog_timeout;
 	u8				watchdog_enabled;
 	u8				reset_reason;
 
-	/* sensors, missing on RDU? */
+	u8				orientation;
+	bool				stowed;
+
 	int				sensor_28v;
 	int				sensor_12v;
 	int				sensor_5v;
 	int				sensor_3v3;
 	int				temperature;
+	int				temperature_2;
+	int				backlight_current;
 
 	struct pic_version		bootloader_version;
 	struct pic_version		firmware_version;
@@ -76,6 +79,13 @@ struct pic_cmd_desc {
 	zii_pic_handler_t	response_handler;
 };
 
-/* common response handlers */
+static inline int zii_pic_f88_to_int(u8 *data)
+{
+	return data[1] * 1000 + (data[0] * 1000 >> 8);
+}
+
+int zii_pic_mcu_cmd(struct zii_pic_mfd *adev,
+		enum zii_pic_cmd_id id, const u8 * const data, u8 data_size);
+
 
 #endif /* _LINUX_ZII_PIC_CORE_H_ */
