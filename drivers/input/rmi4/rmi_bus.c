@@ -312,6 +312,9 @@ static struct rmi_function_handler *fn_handlers[] = {
 #ifdef CONFIG_RMI4_F12
 	&rmi_f12_handler,
 #endif
+#ifdef CONFIG_RMI4_F30
+	&rmi_f30_handler,
+#endif
 };
 
 #define RMI_FN_HANDLER_ARRAY_SIZE \
