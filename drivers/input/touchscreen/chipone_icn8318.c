@@ -223,18 +223,18 @@ static int icn8318_probe(struct i2c_client *client,
 		return error;
 	}
 
-	if (of_property_read_u32(np, "touchscreen-size-x", &data->max_x) ||
-	    of_property_read_u32(np, "touchscreen-size-y", &data->max_y)) {
-		dev_err(dev, "Error touchscreen-size-x and/or -y missing\n");
+	if (of_property_read_u32(np, "touch-size-x", &data->max_x) ||
+	    of_property_read_u32(np, "touch-size-y", &data->max_y)) {
+		dev_err(dev, "Error touch-size-x and/or -y missing\n");
 		return -EINVAL;
 	}
 
 	/* Optional */
-	of_property_read_u32(np, "touchscreen-fuzz-x", &fuzz_x);
-	of_property_read_u32(np, "touchscreen-fuzz-y", &fuzz_y);
-	data->invert_x = of_property_read_bool(np, "touchscreen-inverted-x");
-	data->invert_y = of_property_read_bool(np, "touchscreen-inverted-y");
-	data->swap_x_y = of_property_read_bool(np, "touchscreen-swapped-x-y");
+	of_property_read_u32(np, "touch-fuzz-x", &fuzz_x);
+	of_property_read_u32(np, "touch-fuzz-y", &fuzz_y);
+	data->invert_x = of_property_read_bool(np, "touch-inverted-x");
+	data->invert_y = of_property_read_bool(np, "touch-inverted-y");
+	data->swap_x_y = of_property_read_bool(np, "touch-swapped-x-y");
 
 	input = devm_input_allocate_device(dev);
 	if (!input)
