@@ -6,6 +6,8 @@ struct uart_slave {
 	struct tty_operations ops;
 	struct device dev;
 	bool finalized;
+
+	int (*device_added) (struct uart_slave *);
 };
 
 int uart_slave_add_tty(struct uart_slave *slave);

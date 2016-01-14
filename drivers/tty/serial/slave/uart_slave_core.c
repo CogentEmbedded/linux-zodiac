@@ -69,6 +69,39 @@ struct bus_type uart_slave_bus_type = {
 	.match		= uart_slave_match,
 };
 
+static int uart_slave_tty_dev_match(struct device *dev, void *tty)
+{
+	struct uart_slave *slave =
+		container_of(dev, struct uart_slave, dev);
+
+	return slave->tty_dev == tty;
+}
+
+static int uart_slave_add_dev(struct device *class_dev,
+		struct class_interface *class_intf)
+{
+	struct uart_slave *slave;
+	struct device *dev;
+	int ret = 0;
+
+	dev = bus_find_device(&uart_slave_bus_type, NULL,
+			class_dev, uart_slave_tty_dev_match);
+	if (!dev)
+		return 0;
+
+	slave = container_of(dev, struct uart_slave, dev);
+	if (slave->device_added)
+		ret = slave->device_added(slave);
+
+	put_device(dev);
+
+	return ret;
+}
+
+static struct class_interface uart_slave_interface = {
+	.add_dev = &uart_slave_add_dev,
+};
+
 int uart_slave_register(struct device *parent,
 			struct device *tty, struct tty_driver *drv)
 {
@@ -153,11 +186,27 @@ EXPORT_SYMBOL(uart_slave_driver_register);
 
 static int __init uart_slave_init(void)
 {
-	return bus_register(&uart_slave_bus_type);
+	int ret;
+
+	ret = bus_register(&uart_slave_bus_type);
+	if (ret)
+		goto exit;
+
+	uart_slave_interface.class = tty_class;
+	ret = class_interface_register(&uart_slave_interface);
+	if (ret) {
+		bus_unregister(&uart_slave_bus_type);
+		pr_err("%s: unable to register class interface\n", __func__);
+	}
+
+exit:
+	return ret;
 }
 
 static void __exit uart_slave_exit(void)
 {
+	class_interface_unregister(&uart_slave_interface);
+
 	bus_unregister(&uart_slave_bus_type);
 }
 
