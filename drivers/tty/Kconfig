@@ -365,6 +365,17 @@ config TRACE_SINK
 	  If you select this option, you need to select
 	  "Trace data router for MIPI P1149.7 cJTAG standard".
 
+config N_MCU
+	tristate "Generic microcontroller unit support"
+	default n
+	select CRC_CCITT
+	help
+	  Allows UART communication with generic microcontroller unit (MCU)
+	  using simple commands/events with ACK and checksum
+
+	  You should select this driver if the target kernel is meant for
+	  an embedded device containing MCU connected via UART
+
 config PPC_EPAPR_HV_BYTECHAN
 	bool "ePAPR hypervisor byte channel driver"
 	depends on PPC
