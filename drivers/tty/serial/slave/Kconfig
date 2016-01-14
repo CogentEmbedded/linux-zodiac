@@ -1,5 +1,5 @@
 menuconfig UART_SLAVE
-	tristate "UART slave devices"
+	bool "UART slave devices"
 	depends on OF
 	help
 	 Devices which attach via a uart, but need extra
