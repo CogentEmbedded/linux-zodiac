@@ -156,7 +156,7 @@ static int rmi_function_match(struct device *dev, struct device_driver *drv)
 #ifdef CONFIG_OF
 static void rmi_function_of_probe(struct rmi_function *fn)
 {
-	char of_name[8];
+	char of_name[9];
 
 	snprintf(of_name, sizeof(of_name), "rmi4-f%02x",
 		fn->fd.function_number);
