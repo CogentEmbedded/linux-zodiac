@@ -1757,6 +1757,13 @@ config SENSORS_ULTRA45
 	  This driver provides support for the Ultra45 workstation environmental
 	  sensors.
 
+config SENSORS_ZII_PIC
+	bool "ZII PIC sensors"
+	depends on MFD_ZII_PIC
+	help
+	  This driver provides support for the Zodiac Inflight Infotainment PIC
+	  sensors (voltage, temperature, etc)
+
 if ACPI
 
 comment "ACPI drivers"
