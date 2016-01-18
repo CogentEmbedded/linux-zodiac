@@ -6,6 +6,7 @@
 #define ZII_PIC_NAME_EEPROM		"pic-eeprom"
 #define ZII_PIC_NAME_MAIN_EEPROM	"pic-main-eeprom"
 #define ZII_PIC_NAME_DDS_EEPROM		"pic-dds-eeprom"
+#define ZII_PIC_NAME_PWRBUTTON		"pic-pwrbutton"
 
 #define ZII_PIC_DEFAULT_BAUD_RATE	57600
 
@@ -94,6 +95,14 @@ int zii_pic_eeprom_read(struct device *pic_dev,
 int zii_pic_eeprom_write(struct device *pic_dev,
 		enum zii_pic_eeprom_type type, u16 reg,
 		const void *data, size_t size);
+
+/* Input events */
+typedef void (*zii_pic_pwrbutton_callback_t)(void *pwrbutton,
+		bool state);
+
+int zii_pic_register_pwrbutton_callback(struct device *pic_dev,
+		zii_pic_pwrbutton_callback_t callback,
+		void *pwrbutton);
 
 
 #endif /* _LINUX_ZII_PIC_H_ */

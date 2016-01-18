@@ -80,6 +80,10 @@ static const struct mfd_cell zii_pic_devices[] = {
 		.of_compatible = "zii,pic-hwmon",
 		.name = ZII_PIC_NAME_HWMON,
 	},
+	{
+		.of_compatible = "zii,pic-pwrbutton",
+		.name = ZII_PIC_NAME_PWRBUTTON,
+	},
 };
 
 static int zii_pic_device_added(struct uart_slave *slave)
@@ -861,6 +865,20 @@ int zii_pic_eeprom_write(struct device *pic_dev,
 		data += count;
 
 	} while(bytes_left);
+
+	return 0;
+}
+
+int zii_pic_register_pwrbutton_callback(struct device *pic_dev,
+		zii_pic_pwrbutton_callback_t callback,
+		void *pwrbutton)
+{
+	struct zii_pic_mfd *adev = dev_get_drvdata(pic_dev);
+
+	pr_debug("%s: enter\n", __func__);
+
+	adev->pwrbutton_event = callback;
+	adev->pwrbutton = pwrbutton;
 
 	return 0;
 }
