@@ -97,6 +97,9 @@ struct zii_pic_mfd {
 	u8				eeprom_page[ZII_PIC_EEPROM_PAGE_SIZE];
 
 	int (*uart_open)(struct tty_struct * tty, struct file * filp);
+
+	zii_pic_pwrbutton_callback_t	pwrbutton_event;
+	void				*pwrbutton;
 };
 
 static inline int zii_pic_f88_to_int(u8 *data)

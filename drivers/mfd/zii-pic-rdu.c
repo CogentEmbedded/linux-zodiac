@@ -158,7 +158,9 @@ void zii_pic_rdu_event_handler(struct zii_pic_mfd *adev,
 	switch (event->data[0]) {
 	case ZII_PIC_RDU_EVENT_BUTTON_PRESS:
 		event->data[0] = ZII_PIC_RDU_RESPONSE_BUTTON_PRESS;
-		/* TODO: trigger input event */
+		if (adev->pwrbutton_event)
+			adev->pwrbutton_event(adev->pwrbutton,
+				event->data[2]);
 		break;
 
 	case ZII_PIC_RDU_EVENT_ORIENTATION:
