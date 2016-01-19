@@ -3,8 +3,6 @@
  * platform description for 93xx46 EEPROMs.
  */
 
-#include <linux/of_gpio.h>
-
 struct eeprom_93xx46_platform_data {
 	unsigned char	flags;
 #define EE_ADDR8	0x01		/*  8 bit addr. cfg */
@@ -23,5 +21,4 @@ struct eeprom_93xx46_platform_data {
 	 */
 	void (*prepare)(void *);
 	void (*finish)(void *);
-	struct gpio_desc *select;
 };
