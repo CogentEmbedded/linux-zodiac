@@ -375,6 +375,7 @@ static int nvmem_setup_compat(struct nvmem_device *nvmem,
 		nvmem->eeprom = bin_attr_ro_root_nvmem;
 	else
 		nvmem->eeprom = bin_attr_rw_root_nvmem;
+	sysfs_attr_init(&nvmem->eeprom.attr);
 	nvmem->eeprom.attr.name = "eeprom";
 	nvmem->eeprom.size = nvmem->size;
 	nvmem->eeprom.private = &nvmem->dev;
