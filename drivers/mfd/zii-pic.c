@@ -84,6 +84,10 @@ static const struct mfd_cell zii_pic_devices[] = {
 		.of_compatible = "zii,pic-pwrbutton",
 		.name = ZII_PIC_NAME_PWRBUTTON,
 	},
+	{
+		.of_compatible = "zii,pic-backlight",
+		.name = ZII_PIC_NAME_BACKLIGHT,
+	},
 };
 
 static int zii_pic_device_added(struct uart_slave *slave)
@@ -306,6 +310,7 @@ static int zii_pic_configure(struct zii_pic_mfd *adev)
 		checksum_type = N_MCU_CHECKSUM_8B2C;
 		adev->cmd = zii_pic_rdu_cmds;
 		adev->checksum_size = 1;
+		adev->init = zii_pic_rdu_init;
 		break;
 
 	default:
@@ -330,6 +335,12 @@ static int zii_pic_configure(struct zii_pic_mfd *adev)
 		return ret;
 
 	zii_pic_get_reset_reason(adev);
+
+	if (adev->init) {
+		ret = adev->init(adev);
+		if (ret)
+			return ret;
+	}
 
 	ret = mfd_add_devices(adev->dev, -1, zii_pic_devices,
 			ARRAY_SIZE(zii_pic_devices), NULL, 0, NULL);
@@ -966,6 +977,24 @@ int zii_pic_register_pwrbutton_callback(struct device *pic_dev,
 
 	return 0;
 }
+
+int zii_pic_backlight_set(struct device *pic_dev, int intensity)
+{
+	struct zii_pic_mfd *adev = dev_get_drvdata(pic_dev);
+	u8 data[3] = {0, 0, 0};
+
+	pr_debug("%s: enter\n", __func__);
+
+	if (intensity < 0 || intensity > 100)
+		return -EINVAL;
+
+	data[0] = intensity;
+	if (intensity)
+		data[0] |= 0x80;
+
+	return zii_pic_mcu_cmd(adev, ZII_PIC_CMD_BACKLIGHT, data, sizeof(data));
+}
+
 
 
 static struct device_driver zii_pic_mfd_drv = {
