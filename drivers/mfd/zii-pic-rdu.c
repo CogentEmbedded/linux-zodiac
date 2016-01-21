@@ -23,6 +23,7 @@
 
 #include <linux/kernel.h>
 #include <linux/device.h>
+#include <linux/nvmem-consumer.h>
 
 #include "zii-pic-niu.h"
 #include "zii-pic-rdu.h"
@@ -72,6 +73,10 @@ struct zii_pic_cmd_desc zii_pic_rdu_cmds[ZII_PIC_CMD_COUNT] = {
 	{0xA3, 2, zii_pic_rdu_process_dds_eeprom_read},
 	/* ZII_PIC_CMD_DDS_EEPROM_WRITE */
 	{0xA3, 34, zii_pic_rdu_process_dds_eeprom_write},
+	/* ZII_PIC_CMD_GET_BOOT_SOURCE */
+	{0,    0, NULL},
+	/* ZII_PIC_CMD_SET_BOOT_SOURCE */
+	{0,    0, NULL},
 };
 
 int zii_pic_rdu_process_status_response(struct zii_pic_mfd *adev,
@@ -98,6 +103,7 @@ int zii_pic_rdu_process_status_response(struct zii_pic_mfd *adev,
 		(status->bk[0] & 0x80) ? "On" : "Off", status->bk[0] & 0x7f);
 	adev->backlight_current = status->bk[1] | status->bk[2] << 8;
 
+	adev->boot_source = (status->gs >> 2) & 0x03;
 	return 0;
 }
 
@@ -228,3 +234,48 @@ int zii_pic_rdu_hwmon_read_sensor(struct zii_pic_mfd *adev,
 
 	return ret;
 }
+
+int zii_pic_rdu_set_boot_source(struct zii_pic_mfd *adev,
+		enum zii_pic_boot_source source)
+{
+	struct nvmem_cell *cell;
+	void *value;
+	size_t cell_len;
+	int ret = 0;
+
+	pr_debug("%s: enter\n", __func__);
+
+	/* On RDU it is accessible only via EEPROM */
+	cell = devm_nvmem_cell_get(adev->dev, "boot_source");
+	if (IS_ERR(cell)) {
+		pr_warn("%s: failed to get boot source NVMEM cell\n", __func__);
+		return PTR_ERR(cell);
+	}
+
+	value = nvmem_cell_read(cell, &cell_len);
+	if (IS_ERR(value)) {
+		pr_warn("%s: failed to get boot source from EEPROM\n", __func__);
+		ret = PTR_ERR(cell);
+		goto out;
+	}
+
+	if (*(enum zii_pic_boot_source*)value != source) {
+		u8 data =  source;
+		pr_debug("%s: updating boot source from %d to %d\n", __func__,
+				*(enum zii_pic_boot_source*)value, source);
+		ret = nvmem_cell_write(cell, &data, sizeof(data));
+		if (ret < 0)
+			pr_err("%s: failed to save boot source to EEPROM\n",
+				__func__);
+		else {
+			pr_debug("%s: bytes written to cell: %d\n", __func__, ret);
+			ret = 0;
+		}
+	}
+
+out:
+	devm_nvmem_cell_put(adev->dev, cell);
+
+	return ret;
+}
+

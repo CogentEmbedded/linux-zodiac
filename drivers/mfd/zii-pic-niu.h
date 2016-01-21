@@ -68,6 +68,8 @@ int zii_pic_niu_process_eeprom_read(struct zii_pic_mfd *adev,
 				u8 *data, u8 size);
 int zii_pic_niu_process_eeprom_write(struct zii_pic_mfd *adev,
 				u8 *data, u8 size);
+int zii_pic_niu_process_get_boot_source(struct zii_pic_mfd *adev,
+			u8 *data, u8 size);
 
 int zii_pic_niu_hwmon_read_sensor(struct zii_pic_mfd *adev,
 			enum zii_pic_sensor id, int *val);
