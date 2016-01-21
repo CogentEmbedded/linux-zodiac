@@ -16,11 +16,15 @@
 #include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
+#include <linux/proc_fs.h>
 
 struct attrib {
 	struct list_head list;
+	struct proc_dir_entry *proc_file;
 	struct bin_attribute attr;
 };
+
+struct proc_dir_entry *proc_dir;
 
 static LIST_HEAD(attribs);
 
@@ -121,12 +125,44 @@ static int zii_np_remove(struct platform_device *pdev)
 {
 	struct attrib *attrib;
 
-	list_for_each_entry(attrib, &attribs, list)
+	list_for_each_entry(attrib, &attribs, list) {
 		device_remove_bin_file(&pdev->dev, &attrib->attr);
+		if (attrib->proc_file)
+			proc_remove(attrib->proc_file);
+	}
+
+	if (proc_dir)
+		proc_remove(proc_dir);
 
 	return 0;
 }
 
+static int np_show(struct seq_file *m, void *v)
+{
+	char *data;
+	size_t len;
+	struct nvmem_cell *cell = m->private;
+
+	data = nvmem_cell_read(cell, &len);
+	memcpy(m->buf + m->count, data, len);
+	m->count += len;
+	kfree(data);
+
+	return 0;
+}
+
+static int np_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, np_show, PDE_DATA(inode));
+}
+
+static const struct file_operations np_fops = {
+	.owner      = THIS_MODULE,
+	.open       = np_open,
+	.read       = seq_read,
+	.llseek     = seq_lseek,
+	.release    = single_release,
+};
 
 static int zii_np_probe(struct platform_device *pdev)
 {
@@ -135,8 +171,16 @@ static int zii_np_probe(struct platform_device *pdev)
 	struct nvmem_cell *cell;
 	struct attrib *attrib;
 	const char *name;
+	const char *proc_path;
 	int i = 0;
 	int ret;
+
+	ret = of_property_read_string(np, "proc-path", &proc_path);
+	if (!ret) {
+		proc_dir = proc_mkdir(proc_path, NULL);
+		if (proc_dir == NULL)
+			return -ENOMEM;
+	}
 
 	for (;;) {
 		ret = of_property_read_string_index(np, "strings", i, &name);
@@ -162,6 +206,10 @@ static int zii_np_probe(struct platform_device *pdev)
 		ret = device_create_bin_file(dev, &attrib->attr);
 		if (ret)
 			goto out;
+
+		if (proc_dir)
+			attrib->proc_file = proc_create_data(name, S_IRUGO,
+					proc_dir, &np_fops, cell);
 
 		list_add(&attrib->list, &attribs);
 		i++;
@@ -193,6 +241,10 @@ static int zii_np_probe(struct platform_device *pdev)
 		ret = device_create_bin_file(dev, &attrib->attr);
 		if (ret)
 			goto out;
+
+		if (proc_dir)
+			attrib->proc_file = proc_create_data(name, S_IRUGO,
+					proc_dir, &np_fops, cell);
 
 		list_add(&attrib->list, &attribs);
 		i++;
