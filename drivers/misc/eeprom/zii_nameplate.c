@@ -18,107 +18,91 @@
 #include <linux/slab.h>
 #include <linux/proc_fs.h>
 
+typedef enum {
+	NP_INT,
+	NP_STRING,
+} np_type;
+
 struct attrib {
 	struct list_head list;
 	struct proc_dir_entry *proc_file;
 	struct bin_attribute attr;
+	struct nvmem_cell *cell;
+	np_type type;
 };
 
 struct proc_dir_entry *proc_dir;
 
 static LIST_HEAD(attribs);
 
-static ssize_t bin_attr_zii_np_read_string(struct file *filp,
+static ssize_t np_read(struct file *filp,
 					   struct kobject *kobj,
 					   struct bin_attribute *attr,
 					   char *buf, loff_t pos, size_t count)
 {
-	struct nvmem_cell *cell = attr->private;
-	void *string;
-	size_t len;
-	int ret = 0;
-
-	string = nvmem_cell_read(cell, &len);
-	if (IS_ERR(string))
-		return PTR_ERR(string);
-
-	if (pos >= len) {
-		ret = 0;
-		goto out;
-	}
-
-	if (pos + count > len)
-		count = len - pos;
-
-	memcpy(buf, string + pos, count);
-	ret = count;
-
-out:
-	kfree(string);
-	return ret;
-}
-
-static const struct bin_attribute bin_attr_string = {
-	.attr	= {
-		.mode	= S_IRUGO,
-	},
-	.read	= bin_attr_zii_np_read_string,
-};
-
-static ssize_t bin_attr_zii_np_read_integer(struct file *filp,
-					    struct kobject *kobj,
-					    struct bin_attribute *attr,
-					    char *buf, loff_t pos,
-					    size_t count)
-{
-	struct nvmem_cell *cell = attr->private;
-	char string[128];
-	int ret = 0;
+	struct attrib *attrib = attr->private;
 	void *value;
 	size_t cell_len;
-	size_t len;
-	u8 u8;
-	u32 u32;
+	int ret = 0;
 
-	value = nvmem_cell_read(cell, &cell_len);
+	value = nvmem_cell_read(attrib->cell, &cell_len);
 	if (IS_ERR(value))
 		return PTR_ERR(value);
 
-	switch (cell_len) {
-	case 1:
-		memcpy(&u8, value, 1);
-		len = sprintf(string, "0x%02X", u8);
-		break;
-	case 4:
-		memcpy(&u32, value, 4);
-		len = sprintf(string, "0x%08X", u32);
-		break;
-	default:
-		ret = -EINVAL;
-		goto out;
+	if (attrib->type == NP_STRING) {
+		if (pos >= cell_len) {
+			ret = 0;
+			goto out;
+		}
+
+		if (pos + count > cell_len)
+			count = cell_len - pos;
+
+		memcpy(buf, value + pos, count);
+		ret = count;
 	}
+	if (attrib->type == NP_INT) {
+		u8 u8;
+		u32 u32;
+		size_t len;
+		char string[128];
 
-	if (pos >= len) {
-		ret = 0;
-		goto out;
+		switch (cell_len) {
+		case 1:
+			memcpy(&u8, value, 1);
+			len = sprintf(string, "0x%02X", u8);
+			break;
+		case 4:
+			memcpy(&u32, value, 4);
+			len = sprintf(string, "0x%08X", u32);
+			break;
+		default:
+			ret = -EINVAL;
+			goto out;
+		}
+
+		if (pos >= len) {
+			ret = 0;
+			goto out;
+		}
+
+		if (pos + count > len)
+			count = len - pos;
+
+		memcpy(buf, string + pos, count);
+		ret = count;
 	}
-
-	if (pos + count > len)
-		count = len - pos;
-
-	memcpy(buf, string + pos, count);
-	ret = count;
 
 out:
 	kfree(value);
 	return ret;
 }
 
-static const struct bin_attribute bin_attr_integer = {
+static const struct bin_attribute bin_attr = {
 	.attr	= {
 		.mode	= S_IRUGO,
 	},
-	.read	= bin_attr_zii_np_read_integer,
+	.read	= np_read,
 };
 
 static int zii_np_remove(struct platform_device *pdev)
@@ -139,14 +123,38 @@ static int zii_np_remove(struct platform_device *pdev)
 
 static int np_show(struct seq_file *m, void *v)
 {
-	char *data;
-	size_t len;
-	struct nvmem_cell *cell = m->private;
+	void *value;
+	int ret = 0;
+	size_t cell_len;
+	struct attrib *attrib = m->private;
 
-	data = nvmem_cell_read(cell, &len);
-	memcpy(m->buf + m->count, data, len);
-	m->count += len;
-	kfree(data);
+	value = nvmem_cell_read(attrib->cell, &cell_len);
+
+	if (attrib->type == NP_STRING) {
+		memcpy(m->buf + m->count, value, cell_len);
+		m->count += cell_len;
+	}
+	if (attrib->type == NP_INT) {
+		u8 u8;
+		u32 u32;
+
+		switch (cell_len) {
+		case 1:
+			memcpy(&u8, value, 1);
+			seq_printf(m, "0x%02X", u8);
+			break;
+		case 4:
+			memcpy(&u32, value, 4);
+			seq_printf(m, "0x%08X", u32);
+			break;
+		default:
+			ret = -EINVAL;
+			goto out;
+		}
+	}
+
+out:
+	kfree(value);
 
 	return 0;
 }
@@ -198,10 +206,12 @@ static int zii_np_probe(struct platform_device *pdev)
 			goto out;
 		}
 		INIT_LIST_HEAD(&attrib->list);
-		attrib->attr = bin_attr_string;
+		attrib->attr = bin_attr;
 		sysfs_bin_attr_init(&attrib->attr);
 		attrib->attr.attr.name = name;
-		attrib->attr.private = cell;
+		attrib->attr.private = attrib;
+		attrib->cell = cell;
+		attrib->type = NP_STRING;
 
 		ret = device_create_bin_file(dev, &attrib->attr);
 		if (ret)
@@ -209,7 +219,7 @@ static int zii_np_probe(struct platform_device *pdev)
 
 		if (proc_dir)
 			attrib->proc_file = proc_create_data(name, S_IRUGO,
-					proc_dir, &np_fops, cell);
+					proc_dir, &np_fops, attrib);
 
 		list_add(&attrib->list, &attribs);
 		i++;
@@ -233,10 +243,12 @@ static int zii_np_probe(struct platform_device *pdev)
 			goto out;
 		}
 		INIT_LIST_HEAD(&attrib->list);
-		attrib->attr = bin_attr_integer;
+		attrib->attr = bin_attr;
 		sysfs_bin_attr_init(&attrib->attr);
 		attrib->attr.attr.name = name;
-		attrib->attr.private = cell;
+		attrib->attr.private = attrib;
+		attrib->cell = cell;
+		attrib->type = NP_INT;
 
 		ret = device_create_bin_file(dev, &attrib->attr);
 		if (ret)
@@ -244,7 +256,7 @@ static int zii_np_probe(struct platform_device *pdev)
 
 		if (proc_dir)
 			attrib->proc_file = proc_create_data(name, S_IRUGO,
-					proc_dir, &np_fops, cell);
+					proc_dir, &np_fops, attrib);
 
 		list_add(&attrib->list, &attribs);
 		i++;
