@@ -7,6 +7,7 @@
 #define ZII_PIC_NAME_MAIN_EEPROM	"pic-main-eeprom"
 #define ZII_PIC_NAME_DDS_EEPROM		"pic-dds-eeprom"
 #define ZII_PIC_NAME_PWRBUTTON		"pic-pwrbutton"
+#define ZII_PIC_NAME_BACKLIGHT		"pic-backlight"
 
 #define ZII_PIC_DEFAULT_BAUD_RATE	57600
 
@@ -44,6 +45,10 @@ enum zii_pic_cmd_id {
 	/* Boot source */
 	ZII_PIC_CMD_GET_BOOT_SOURCE,
 	ZII_PIC_CMD_SET_BOOT_SOURCE,
+
+	/* LCD Backlight */
+	ZII_PIC_CMD_LCD_BOOT_ENABLE,
+	ZII_PIC_CMD_BACKLIGHT,
 
 	/* Add new command IDs here */
 
@@ -108,5 +113,7 @@ int zii_pic_register_pwrbutton_callback(struct device *pic_dev,
 		zii_pic_pwrbutton_callback_t callback,
 		void *pwrbutton);
 
+/* LCD Backlight */
+int zii_pic_backlight_set(struct device *pic_dev, int intensity);
 
 #endif /* _LINUX_ZII_PIC_H_ */

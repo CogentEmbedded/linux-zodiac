@@ -79,4 +79,8 @@ struct zii_pic_cmd_desc zii_pic_mezz_cmds[ZII_PIC_CMD_COUNT] = {
 	{0x14,	  1, zii_pic_mezz_process_get_boot_source},
 	/* ZII_PIC_CMD_SET_BOOT_SOURCE */
 	{0x14,	  1, NULL},
+	/* ZII_PIC_CMD_LCD_BOOT_ENABLE */
+	{0,    0, NULL},
+	/* ZII_PIC_CMD_BACKLIGHT */
+	{0,    0, NULL},
 };

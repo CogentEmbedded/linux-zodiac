@@ -21,6 +21,7 @@
 
 /* #define DEBUG */
 
+#include <linux/delay.h>
 #include <linux/kernel.h>
 #include <linux/device.h>
 #include <linux/nvmem-consumer.h>
@@ -77,22 +78,29 @@ struct zii_pic_cmd_desc zii_pic_rdu_cmds[ZII_PIC_CMD_COUNT] = {
 	{0,    0, NULL},
 	/* ZII_PIC_CMD_SET_BOOT_SOURCE */
 	{0,    0, NULL},
+	/* ZII_PIC_CMD_LCD_BOOT_ENABLE */
+	{0xBE, 1, NULL},
+	/* ZII_PIC_CMD_BACKLIGHT */
+	{0xA6, 3, NULL},
 };
 
 int zii_pic_rdu_process_status_response(struct zii_pic_mfd *adev,
 		u8 *data, u8 size)
 {
-	struct zii_pic_rdu_status_info *status =
-			(struct zii_pic_rdu_status_info*)data;
+	struct zii_pic_rdu_status_info_common *status =
+			(struct zii_pic_rdu_status_info_common*)data;
 
-	pr_debug("%s: enter\n", __func__);
+	pr_debug("%s: enter: size: %d, sizeof: %d\n", __func__, size, sizeof(*status));
 
-	/* bad response, ignore */
-	if (size != sizeof(*status))
+	/* Looks like different firmware versions response with different size
+	 * parse only common parts here or add by version processing  */
+	if (size < sizeof(*status))
 		return -EINVAL;
 
-	memcpy(&adev->bootloader_version, &data[0], 6);
-	memcpy(&adev->firmware_version, &data[6], 6);
+	memcpy(&adev->bootloader_version,
+		&status->bl, sizeof(adev->bootloader_version));
+	memcpy(&adev->firmware_version,
+		&status->fw, sizeof(adev->firmware_version));
 
 	adev->sensor_28v = zii_pic_f88_to_int(status->v);
 
@@ -100,8 +108,10 @@ int zii_pic_rdu_process_status_response(struct zii_pic_mfd *adev,
 	adev->temperature_2 = status->t2 * 500;
 
 	pr_debug("%s: backlight state: %s, brightness: %d\n", __func__,
-		(status->bk[0] & 0x80) ? "On" : "Off", status->bk[0] & 0x7f);
-	adev->backlight_current = status->bk[1] | status->bk[2] << 8;
+		(status->bk[0] & 0x80) ? "On" : "Off",
+		status->bk[0] & 0x7f);
+	adev->backlight_current =
+		status->bk[1] | status->bk[2] << 8;
 
 	adev->boot_source = (status->gs >> 2) & 0x03;
 	return 0;
@@ -194,6 +204,7 @@ int zii_pic_rdu_hwmon_read_sensor(struct zii_pic_mfd *adev,
 			enum zii_pic_sensor id, int *val)
 {
 	int ret;
+	pr_debug("%s: enter\n", __func__);
 
 	ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_GET_STATUS, NULL, 0);
 	if (ret)
@@ -279,3 +290,23 @@ out:
 	return ret;
 }
 
+int zii_pic_rdu_init(struct zii_pic_mfd *adev)
+{
+	u8 data = 0;
+	int ret;
+
+	pr_debug("%s: enter\n", __func__);
+
+	/* FIXME: *.bx RDU FW version does not implement this command */
+	if ((adev->firmware_version.letter_1 == 'b') &&
+		(adev->firmware_version.letter_2 == 'x'))
+		return 0;
+
+	/* HW specific init, need to let PIC know that LCD could be enabled */
+	ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_LCD_BOOT_ENABLE, &data, 1);
+
+	/* After this command PIC is unresponsive for about 300 ms */
+	mdelay(300);
+
+	return ret;
+}
