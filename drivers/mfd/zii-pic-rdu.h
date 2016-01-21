@@ -29,18 +29,9 @@
 #define		ZII_PIC_RDU_EVENT_ORIENTATION		0xE2
 #define 	ZII_PIC_RDU_RESPONSE_ORIENTATION	0xE3
 
-
-struct zii_pic_rdu_status_info {
-	u8	bl_part_num_hw;
-	u16	bl_part_num_major_ver;
-	u8	bl_part_num_minor_ver;
-	u8	bl_part_num_letter_1;
-	u8	bl_part_num_letter_2;
-	u8	fw_part_num_hw;
-	u16	fw_part_num_major_ver;
-	u8	fw_part_num_minor_ver;
-	u8	fw_part_num_letter_1;
-	u8	fw_part_num_letter_2;
+struct zii_pic_rdu_status_info_common {
+	struct zii_pic_version bl;
+	struct zii_pic_version fw;
 
 	u16	rf;
 	u16	df;
@@ -56,6 +47,13 @@ struct zii_pic_rdu_status_info {
 	u8	ib;
 	u8	ps;
 	u8	gs;
+} __packed;
+
+struct zii_pic_rdu_status_info {
+	struct zii_pic_rdu_status_info_common common;
+
+	/* FIXME: On RDU with FW 2.3.0.bx size of status structure is one
+	 * byte less, need to confirm which leftover byte is missing */
 	u8	wf;
 	u8	pl;
 	u8	dt;
@@ -83,6 +81,8 @@ int zii_pic_rdu_hwmon_read_sensor(struct zii_pic_mfd *adev,
 
 int zii_pic_rdu_set_boot_source(struct zii_pic_mfd *adev,
 		enum zii_pic_boot_source source);
+
+int zii_pic_rdu_init(struct zii_pic_mfd *adev);
 
 extern struct zii_pic_cmd_desc zii_pic_rdu_cmds[ZII_PIC_CMD_COUNT];
 
