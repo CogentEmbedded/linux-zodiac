@@ -153,9 +153,9 @@ static int zii_np_probe(struct platform_device *pdev)
 			ret = -ENOMEM;
 			goto out;
 		}
-
 		INIT_LIST_HEAD(&attrib->list);
 		attrib->attr = bin_attr_string;
+		sysfs_bin_attr_init(&attrib->attr);
 		attrib->attr.attr.name = name;
 		attrib->attr.private = cell;
 
@@ -184,9 +184,9 @@ static int zii_np_probe(struct platform_device *pdev)
 			ret = -ENOMEM;
 			goto out;
 		}
-
 		INIT_LIST_HEAD(&attrib->list);
 		attrib->attr = bin_attr_integer;
+		sysfs_bin_attr_init(&attrib->attr);
 		attrib->attr.attr.name = name;
 		attrib->attr.private = cell;
 
