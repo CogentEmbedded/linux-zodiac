@@ -37,6 +37,13 @@ enum zii_pic_hw_id {
 	PIC_HW_ID_MEZZ,
 	PIC_HW_ID_ESB,
 	PIC_HW_ID_RDU
+
+enum zii_pic_boot_source {
+	PIC_BOOT_SRC_FIRST,
+	PIC_BOOT_SRC_SD = PIC_BOOT_SRC_FIRST,
+	PIC_BOOT_SRC_EMMC,
+	PIC_BOOT_SRC_NOR,
+	PIC_BOOT_SRC_LAST = PIC_BOOT_SRC_NOR
 };
 
 struct zii_pic_version {
@@ -79,6 +86,7 @@ struct zii_pic_mfd {
 	u8				watchdog_timeout;
 	u8				watchdog_enabled;
 	u8				reset_reason;
+	u8				boot_source;
 
 	u8				orientation;
 	bool				stowed;

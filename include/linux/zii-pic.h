@@ -41,6 +41,10 @@ enum zii_pic_cmd_id {
 	ZII_PIC_CMD_DDS_EEPROM_READ,
 	ZII_PIC_CMD_DDS_EEPROM_WRITE,
 
+	/* Boot source */
+	ZII_PIC_CMD_GET_BOOT_SOURCE,
+	ZII_PIC_CMD_SET_BOOT_SOURCE,
+
 	/* Add new command IDs here */
 
 	/* last one to get amount of supported commands */

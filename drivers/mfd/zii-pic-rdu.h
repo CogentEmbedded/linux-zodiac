@@ -81,6 +81,9 @@ void zii_pic_rdu_event_handler(struct zii_pic_mfd *adev,
 int zii_pic_rdu_hwmon_read_sensor(struct zii_pic_mfd *adev,
 			enum zii_pic_sensor id, int *val);
 
+int zii_pic_rdu_set_boot_source(struct zii_pic_mfd *adev,
+		enum zii_pic_boot_source source);
+
 extern struct zii_pic_cmd_desc zii_pic_rdu_cmds[ZII_PIC_CMD_COUNT];
 
 #endif /* _LINUX_ZII_PIC_RDU_H_ */

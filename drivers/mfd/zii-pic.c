@@ -476,9 +476,93 @@ static DEVICE_ATTR(reset_reason, S_IRUSR | S_IRGRP,
 		zii_pic_show_reset_reason, NULL);
 
 
+static ssize_t zii_pic_show_boot_source(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct zii_pic_mfd *adev = dev_get_drvdata(dev);
+
+	switch (adev->hw_id) {
+	case PIC_HW_ID_NIU:
+	case PIC_HW_ID_MEZZ:
+	case PIC_HW_ID_ESB:
+	{
+		int ret;
+		u8 dummy;
+		ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_GET_BOOT_SOURCE,
+				&dummy, sizeof(dummy));
+		if (ret)
+			return ret;
+		break;
+	}
+
+	case PIC_HW_ID_RDU:
+	case PIC_HW_ID_RDU2:
+		/* nothing to do, boot source already set on init by
+		 * get status handler or updated by attribute store */
+		break;
+
+	default:
+		BUG();
+	}
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", adev->boot_source);
+}
+
+static ssize_t zii_pic_store_boot_source(struct device *dev,
+		struct device_attribute *attr,  const char *buf, size_t count)
+{
+	struct zii_pic_mfd *adev = dev_get_drvdata(dev);
+	u8 data;
+	int ret;
+	ret = kstrtou8(buf, 0, &data);
+	if (ret)
+		return ret;
+
+	/* NIU/ESB/MEZZ do not have SD-card to boot from */
+	if (data > PIC_BOOT_SRC_LAST)
+		return -EINVAL;
+
+	switch (adev->hw_id) {
+	case PIC_HW_ID_NIU:
+	case PIC_HW_ID_MEZZ:
+	case PIC_HW_ID_ESB:
+		/* NIU/ESB/MEZZ do not have SD-card to boot from */
+		if (data == PIC_BOOT_SRC_SD)
+			return -EINVAL;
+
+		ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_SET_BOOT_SOURCE,
+				&data, sizeof(data));
+		if (ret)
+			return ret;
+
+		break;
+
+	case PIC_HW_ID_RDU:
+		ret = zii_pic_rdu_set_boot_source(adev, data);
+		if (ret)
+			return ret;
+		break;
+
+	case PIC_HW_ID_RDU2:
+		/* TODO: */
+		break;
+
+	default:
+		BUG();
+	}
+
+	adev->boot_source = data;
+
+	return count;
+}
+
+static DEVICE_ATTR(boot_source, S_IRUSR | S_IWUSR | S_IRGRP,
+		zii_pic_show_boot_source, zii_pic_store_boot_source);
+
 static struct attribute *zii_pic_dev_attrs[] = {
 	&dev_attr_version.attr,
 	&dev_attr_reset_reason.attr,
+	&dev_attr_boot_source.attr,
 	NULL
 };
 

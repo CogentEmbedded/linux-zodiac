@@ -63,6 +63,10 @@ struct zii_pic_cmd_desc zii_pic_niu_cmds[ZII_PIC_CMD_COUNT] = {
 	{0,    0, NULL},
 	/* ZII_PIC_CMD_DDS_EEPROM_WRITE */
 	{0,    0, NULL},
+	/* ZII_PIC_CMD_GET_BOOT_SOURCE */
+	{0x14, 1, zii_pic_niu_process_get_boot_source},
+	/* ZII_PIC_CMD_SET_BOOT_SOURCE */
+	{0x14, 1, NULL},
 };
 
 int zii_pic_niu_process_status_response(struct zii_pic_mfd *adev,
@@ -293,6 +297,14 @@ int zii_pic_niu_process_eeprom_write(struct zii_pic_mfd *adev,
 	if (!data[1])
 		return -EIO;
 
+	return 0;
+}
+
+int zii_pic_niu_process_get_boot_source(struct zii_pic_mfd *adev,
+			u8 *data, u8 size)
+{
+	pr_debug("%s: enter\n", __func__);
+	adev->boot_source = *data;
 	return 0;
 }
 

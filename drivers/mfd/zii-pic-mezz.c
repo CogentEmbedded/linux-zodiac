@@ -36,7 +36,7 @@
 #define zii_pic_mezz_process_eeprom_write	zii_pic_niu_process_eeprom_write
 #define zii_pic_mezz_process_firmware_version	zii_pic_niu_process_firmware_version
 #define zii_pic_mezz_process_bootloader_version	zii_pic_niu_process_bootloader_version
-
+#define zii_pic_mezz_process_get_boot_source	zii_pic_niu_process_get_boot_source
 
 struct zii_pic_cmd_desc zii_pic_mezz_cmds[ZII_PIC_CMD_COUNT] = {
 	/* ZII_PIC_CMD_GET_STATUS */
@@ -75,4 +75,8 @@ struct zii_pic_cmd_desc zii_pic_mezz_cmds[ZII_PIC_CMD_COUNT] = {
 	{0,    0, NULL},
 	/* ZII_PIC_CMD_DDS_EEPROM_WRITE */
 	{0,    0, NULL},
+	/* ZII_PIC_CMD_GET_BOOT_SOURCE */
+	{0x14,	  1, zii_pic_mezz_process_get_boot_source},
+	/* ZII_PIC_CMD_SET_BOOT_SOURCE */
+	{0x14,	  1, NULL},
 };
