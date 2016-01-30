@@ -2,7 +2,7 @@
  * zii-pic-core.h - Multifunction core driver for Zodiac Inflight Infotainment
  * PIC MCU that is connected via dedicated UART port
  *
- * Copyright (C) 2015 Andrey Vostrikov <andrey.vostrikov@cogentembedded.com>
+ * Copyright (C) 2015-2016 Andrey Vostrikov <andrey.vostrikov@cogentembedded.com>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -36,7 +36,9 @@ enum zii_pic_hw_id {
 	PIC_HW_ID_NIU,
 	PIC_HW_ID_MEZZ,
 	PIC_HW_ID_ESB,
-	PIC_HW_ID_RDU
+	PIC_HW_ID_RDU,
+	PIC_HW_ID_RDU2
+};
 
 enum zii_pic_boot_source {
 	PIC_BOOT_SRC_FIRST,
@@ -64,6 +66,23 @@ struct zii_pic_cmd_desc {
 	zii_pic_handler_t	response_handler;
 };
 
+/* Interface to HW-specific implementation for several features */
+struct zii_pic_hw_ops {
+	void (*event_handler)(struct zii_pic_mfd *adev,
+			struct n_mcu_cmd *event);
+	int (*get_status)(struct zii_pic_mfd *adev);
+	int (*get_versions)(struct zii_pic_mfd *adev);
+
+	int (*get_boot_source)(struct zii_pic_mfd *adev);
+	int (*set_boot_source)(struct zii_pic_mfd *adev,
+			enum zii_pic_boot_source boot_src);
+
+	int (*reset)(struct zii_pic_mfd *adev);
+	int (*recovery_reset)(struct zii_pic_mfd *adev);
+	int (*read_sensor)(struct zii_pic_mfd *adev,
+			enum zii_pic_sensor id, int *val);
+};
+
 /*
  * @cmd_seqn: PIC command sequence number
  */
@@ -75,6 +94,7 @@ struct zii_pic_mfd {
 
 	atomic_t			cmd_seqn;
 	struct zii_pic_cmd_desc		*cmd;
+	struct zii_pic_hw_ops		hw_ops;
 	struct n_mcu_ops		mcu_ops;
 
 	enum zii_pic_state		state;
@@ -95,9 +115,10 @@ struct zii_pic_mfd {
 	int				sensor_12v;
 	int				sensor_5v;
 	int				sensor_3v3;
-	int				temperature;
-	int				temperature_2;
-	int				backlight_current;
+	int				sensor_temperature;
+	int				sensor_temperature_2;
+	int				sensor_current;
+	int				sensor_voltage;
 
 	struct zii_pic_version		bootloader_version;
 	struct zii_pic_version		firmware_version;
@@ -111,12 +132,17 @@ struct zii_pic_mfd {
 	void				*pwrbutton;
 };
 
+/* Convert 8.8 fixed point value multiplied by 1000 to integer.
+ * Used to represent sensor values as mV and mA
+ */
 static inline int zii_pic_f88_to_int(u8 *data)
 {
 	return data[1] * 1000 + (data[0] * 1000 >> 8);
 }
 
 int zii_pic_mcu_cmd(struct zii_pic_mfd *adev,
+		enum zii_pic_cmd_id id, const u8 * const data, u8 data_size);
+int zii_pic_mcu_cmd_no_response(struct zii_pic_mfd *adev,
 		enum zii_pic_cmd_id id, const u8 * const data, u8 data_size);
 
 

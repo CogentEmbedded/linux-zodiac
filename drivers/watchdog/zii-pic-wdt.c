@@ -147,7 +147,7 @@ static int zii_pic_wdt_probe(struct platform_device *pdev)
 
 	cell = devm_nvmem_cell_get(&pdev->dev, "wdt_timeout");
 	if (IS_ERR(cell)) {
-		pr_warn("%s: unable to get WDT Timeout from EEPROM\n", __func__);
+		pr_warn("%s: unable to get WDT Timeout from EEPROM, err: %ld\n", __func__, PTR_ERR(cell));
 		adev->wdt.timeout = ZII_PIC_WDT_DEFAULT_TIMEOUT;
 	} else {
 		void *value;

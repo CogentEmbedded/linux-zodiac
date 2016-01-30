@@ -3,7 +3,7 @@
  *  PIC MCU that is connected via dedicated UART port
  * (MEZZ board specific code)
  *
- * Copyright (C) 2015 Andrey Vostrikov <andrey.vostrikov@cogentembedded.com>
+ * Copyright (C) 2015-2016 Andrey Vostrikov <andrey.vostrikov@cogentembedded.com>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -23,6 +23,8 @@
 #define _LINUX_ZII_PIC_MEZZ_H_
 
 #include "zii-pic-core.h"
+
+int zii_pic_mezz_init(struct zii_pic_mfd *adev);
 
 extern struct zii_pic_cmd_desc zii_pic_mezz_cmds[ZII_PIC_CMD_COUNT];
 
