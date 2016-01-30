@@ -3,7 +3,7 @@
  * PIC MCU that is connected via dedicated UART port
  * (RDU board specific code)
  *
- * Copyright (C) 2015 Andrey Vostrikov <andrey.vostrikov@cogentembedded.com>
+ * Copyright (C) 2015-2016 Andrey Vostrikov <andrey.vostrikov@cogentembedded.com>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -60,6 +60,10 @@ struct zii_pic_cmd_desc zii_pic_rdu_cmds[ZII_PIC_CMD_COUNT] = {
 	{0,    0, NULL},
 	/* ZII_PIC_CMD_GET_3V3_READING */
 	{0,    0, NULL},
+	/* ZII_PIC_CMD_GET_VOLTAGE */
+	{0,    0, NULL},
+	/* ZII_PIC_CMD_GET_CURRENT */
+	{0,    0, NULL},
 	/* ZII_PIC_CMD_GET_TEMPERATURE */
 	{0,    0, NULL},
 	/* ZII_PIC_CMD_EEPROM_READ */
@@ -82,6 +86,8 @@ struct zii_pic_cmd_desc zii_pic_rdu_cmds[ZII_PIC_CMD_COUNT] = {
 	{0xBE, 1, NULL},
 	/* ZII_PIC_CMD_BACKLIGHT */
 	{0xA6, 3, NULL},
+	/* ZII_PIC_CMD_BOOTLOADER */
+	{0xB1, 0xff, zii_pic_rdu_process_bl_response},
 };
 
 int zii_pic_rdu_process_status_response(struct zii_pic_mfd *adev,
@@ -104,14 +110,13 @@ int zii_pic_rdu_process_status_response(struct zii_pic_mfd *adev,
 
 	adev->sensor_28v = zii_pic_f88_to_int(status->v);
 
-	adev->temperature = status->t1 * 500;
-	adev->temperature_2 = status->t2 * 500;
+	adev->sensor_temperature = status->t1 * 500;
+	adev->sensor_temperature_2 = status->t2 * 500;
 
 	pr_debug("%s: backlight state: %s, brightness: %d\n", __func__,
 		(status->bk[0] & 0x80) ? "On" : "Off",
 		status->bk[0] & 0x7f);
-	adev->backlight_current =
-		status->bk[1] | status->bk[2] << 8;
+	adev->sensor_current = status->bk[1] | status->bk[2] << 8;
 
 	adev->boot_source = (status->gs >> 2) & 0x03;
 	return 0;
@@ -163,6 +168,12 @@ int zii_pic_rdu_process_dds_eeprom_write(struct zii_pic_mfd *adev,
 	if (!data[1])
 		return -EIO;
 
+	return 0;
+}
+
+int zii_pic_rdu_process_bl_response(struct zii_pic_mfd *adev,
+				u8 *data, u8 size)
+{
 	return 0;
 }
 
@@ -228,15 +239,15 @@ int zii_pic_rdu_hwmon_read_sensor(struct zii_pic_mfd *adev,
 		break;
 
 	case ZII_PIC_SENSOR_TEMPERATURE:
-		*val = adev->temperature;
+		*val = adev->sensor_temperature;
 		break;
 
 	case ZII_PIC_SENSOR_TEMPERATURE_2:
-		*val = adev->temperature_2;
+		*val = adev->sensor_temperature_2;
 		break;
 
 	case ZII_PIC_SENSOR_BACKLIGHT_CURRENT:
-		*val = adev->backlight_current;
+		*val = adev->sensor_current;
 		break;
 
 	default:
@@ -290,6 +301,7 @@ out:
 	return ret;
 }
 
+#if 0
 int zii_pic_rdu_init(struct zii_pic_mfd *adev)
 {
 	u8 data = 0;
@@ -309,4 +321,33 @@ int zii_pic_rdu_init(struct zii_pic_mfd *adev)
 	mdelay(300);
 
 	return ret;
+}
+#endif
+
+int zii_pic_rdu_recovery_reset(struct zii_pic_mfd *adev)
+{
+	u8 data[2] = {1, 1};
+	return zii_pic_mcu_cmd_no_response(adev, ZII_PIC_CMD_RESET,
+					   data, sizeof(data));
+}
+
+int zii_pic_rdu_init(struct zii_pic_mfd *adev)
+{
+	adev->cmd = zii_pic_rdu_cmds;
+	adev->checksum_size = 1;
+
+	adev->hw_ops.event_handler = zii_pic_rdu_event_handler;
+	adev->hw_ops.get_status = zii_pic_niu_get_status;
+	/* RDU takes these values from status response and does not
+	 * implement GET_X_VERSION commands as on other HW variants */
+	adev->hw_ops.get_versions = NULL;
+	/* initial boot source value is read from status response and
+	 * is updated by set_boot_source command */
+	adev->hw_ops.get_boot_source = NULL;
+	adev->hw_ops.set_boot_source = zii_pic_rdu_set_boot_source;
+	adev->hw_ops.reset = zii_pic_niu_reset;
+	adev->hw_ops.recovery_reset = zii_pic_rdu_recovery_reset;
+	adev->hw_ops.read_sensor = zii_pic_rdu_hwmon_read_sensor;
+
+	return 0;
 }

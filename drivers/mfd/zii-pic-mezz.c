@@ -3,7 +3,7 @@
  *  PIC MCU that is connected via dedicated UART port
  * (MEZZ board specific code)
  *
- * Copyright (C) 2015 Andrey Vostrikov <andrey.vostrikov@cogentembedded.com>
+ * Copyright (C) 2015-2016 Andrey Vostrikov <andrey.vostrikov@cogentembedded.com>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -27,24 +27,13 @@
 #include "zii-pic-niu.h"
 #include "zii-pic-mezz.h"
 
-#define zii_pic_mezz_process_status_response	zii_pic_niu_process_status_response
-#define zii_pic_mezz_process_watchdog_state	zii_pic_niu_process_watchdog_state
-#define zii_pic_mezz_process_reset_reason	zii_pic_niu_process_reset_reason
-#define zii_pic_mezz_process_12v		zii_pic_niu_process_12v
-#define zii_pic_mezz_process_temperature	zii_pic_niu_process_temperature
-#define zii_pic_mezz_process_eeprom_read	zii_pic_niu_process_eeprom_read
-#define zii_pic_mezz_process_eeprom_write	zii_pic_niu_process_eeprom_write
-#define zii_pic_mezz_process_firmware_version	zii_pic_niu_process_firmware_version
-#define zii_pic_mezz_process_bootloader_version	zii_pic_niu_process_bootloader_version
-#define zii_pic_mezz_process_get_boot_source	zii_pic_niu_process_get_boot_source
-
 struct zii_pic_cmd_desc zii_pic_mezz_cmds[ZII_PIC_CMD_COUNT] = {
 	/* ZII_PIC_CMD_GET_STATUS */
-	{0x10, 0, zii_pic_mezz_process_status_response},
+	{0x10, 0, zii_pic_niu_process_status_response},
 	/* ZII_PIC_CMD_SW_WDT_SET */
 	{0x1C, 3, NULL},
 	/* ZII_PIC_CMD_SW_WDT_GET */
-	{0x1C, 1, zii_pic_mezz_process_watchdog_state},
+	{0x1C, 1, zii_pic_niu_process_watchdog_state},
 	/* ZII_PIC_CMD_PET_WDT */
 	{0x1D, 0, NULL},
 	/* ZII_PIC_CMD_RESET  */
@@ -52,35 +41,56 @@ struct zii_pic_cmd_desc zii_pic_mezz_cmds[ZII_PIC_CMD_COUNT] = {
 	/* ZII_PIC_CMD_HW_RECOVERY_RESET  */
 	{0,    0, NULL},
 	/* ZII_PIC_CMD_GET_RESET_REASON */
-	{0x1F, 0, zii_pic_mezz_process_reset_reason},
+	{0x1F, 0, zii_pic_niu_process_reset_reason},
 	/* ZII_PIC_CMD_GET_28V_READING */
 	{0,    0, NULL},
 	/* ZII_PIC_CMD_GET_12V_READING */
-	{0x2C, 0, zii_pic_mezz_process_12v},
+	{0x2C, 0, zii_pic_niu_process_12v},
 	/* ZII_PIC_CMD_GET_5V_READING */
 	{0,    0, NULL},
 	/* ZII_PIC_CMD_GET_3V3_READING */
 	{0,    0, NULL},
+	/* ZII_PIC_CMD_GET_VOLTAGE */
+	{0,    0, NULL},
+	/* ZII_PIC_CMD_GET_CURRENT */
+	{0,    0, NULL},
 	/* ZII_PIC_CMD_GET_TEMPERATURE */
-	{0x19, 0, zii_pic_mezz_process_temperature},
+	{0x19, 0, zii_pic_niu_process_temperature},
 	/* ZII_PIC_CMD_EEPROM_READ */
-	{0x20, 3, zii_pic_mezz_process_eeprom_read},
+	{0x20, 3, zii_pic_niu_process_eeprom_read},
 	/* ZII_PIC_CMD_EEPROM_WRITE */
-	{0x20, 35, zii_pic_mezz_process_eeprom_write},
+	{0x20, 35, zii_pic_niu_process_eeprom_write},
 	/* ZII_PIC_CMD_GET_FIRMWARE_VERSION */
-	{0x11, 0, zii_pic_mezz_process_firmware_version},
+	{0x11, 0, zii_pic_niu_process_firmware_version},
 	/* ZII_PIC_CMD_GET_BOOTLOADER_VERSION */
-	{0x12, 0, zii_pic_mezz_process_bootloader_version},
+	{0x12, 0, zii_pic_niu_process_bootloader_version},
 	/* ZII_PIC_CMD_DDS_EEPROM_READ */
 	{0,    0, NULL},
 	/* ZII_PIC_CMD_DDS_EEPROM_WRITE */
 	{0,    0, NULL},
 	/* ZII_PIC_CMD_GET_BOOT_SOURCE */
-	{0x14,	  1, zii_pic_mezz_process_get_boot_source},
+	{0x14, 2, zii_pic_niu_process_get_boot_source},
 	/* ZII_PIC_CMD_SET_BOOT_SOURCE */
-	{0x14,	  1, NULL},
+	{0x14, 2, NULL},
 	/* ZII_PIC_CMD_LCD_BOOT_ENABLE */
 	{0,    0, NULL},
 	/* ZII_PIC_CMD_BACKLIGHT */
 	{0,    0, NULL},
 };
+
+int zii_pic_mezz_init(struct zii_pic_mfd *adev)
+{
+	adev->cmd = zii_pic_mezz_cmds;
+	adev->checksum_size = 2;
+
+	adev->hw_ops.event_handler = NULL;
+	adev->hw_ops.get_status = NULL;
+	adev->hw_ops.get_versions = zii_pic_niu_get_versions;
+	adev->hw_ops.get_boot_source = zii_pic_niu_get_boot_source;
+	adev->hw_ops.set_boot_source = zii_pic_niu_set_boot_source;
+	adev->hw_ops.reset = zii_pic_niu_reset;
+	adev->hw_ops.recovery_reset = NULL;
+	adev->hw_ops.read_sensor = zii_pic_niu_hwmon_read_sensor;
+
+	return 0;
+}
