@@ -72,8 +72,6 @@ int zii_pic_rdu_process_dds_eeprom_read(struct zii_pic_mfd *adev,
 
 int zii_pic_rdu_process_dds_eeprom_write(struct zii_pic_mfd *adev,
 				u8 *data, u8 size);
-int zii_pic_rdu_process_bl_response(struct zii_pic_mfd *adev,
-				u8 *data, u8 size);
 
 void zii_pic_rdu_event_handler(struct zii_pic_mfd *adev,
 		struct n_mcu_cmd *event);

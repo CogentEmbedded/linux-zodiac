@@ -550,4 +550,10 @@ config STACKDEPOT
 	bool
 	select STACKTRACE
 
+config INTEL_HEX
+	def_bool n
+	help
+	  Provides a helper to parse INTEL HEX formatted strings used to store
+	  firmware images
+
 endmenu
