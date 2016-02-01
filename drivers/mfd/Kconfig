@@ -1483,6 +1483,7 @@ config MFD_ZII_PIC
 	bool "ZII PIC MCU core driver"
 	depends on N_MCU && UART_SLAVE
 	select MFD_CORE
+	select INTEL_HEX
 	help
 	  Select this to get support for the PIC microcontroller unit
 	  that is connected via dedicated UART port on several boards from

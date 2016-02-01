@@ -19,7 +19,7 @@
  * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
-/* #define DEBUG */
+#define DEBUG
 
 #include <linux/delay.h>
 #include <linux/kernel.h>
@@ -87,7 +87,7 @@ struct zii_pic_cmd_desc zii_pic_rdu_cmds[ZII_PIC_CMD_COUNT] = {
 	/* ZII_PIC_CMD_BACKLIGHT */
 	{0xA6, 3, NULL},
 	/* ZII_PIC_CMD_BOOTLOADER */
-	{0xB1, 0xff, zii_pic_rdu_process_bl_response},
+	{0xB1, 0xff, NULL},
 };
 
 int zii_pic_rdu_process_status_response(struct zii_pic_mfd *adev,
@@ -168,12 +168,6 @@ int zii_pic_rdu_process_dds_eeprom_write(struct zii_pic_mfd *adev,
 	if (!data[1])
 		return -EIO;
 
-	return 0;
-}
-
-int zii_pic_rdu_process_bl_response(struct zii_pic_mfd *adev,
-				u8 *data, u8 size)
-{
 	return 0;
 }
 
