@@ -130,6 +130,8 @@ struct zii_pic_mfd {
 
 	zii_pic_pwrbutton_callback_t	pwrbutton_event;
 	void				*pwrbutton;
+
+	atomic_t			fw_update_started;
 };
 
 /* Convert 8.8 fixed point value multiplied by 1000 to integer.
