@@ -65,7 +65,6 @@
 #define MAX_SERIAL_BUF_SIZE	(STX_SIZE + 2 * N_MCU_MAX_CMD_SIZE + ETX_SIZE)
 
 #define MAX_RETRIES		3
-#define CMD_TIMEOUT		100
 
 enum parser_state {
 	EXPECT_SOF,
@@ -393,7 +392,7 @@ start:
 	spin_unlock(&n_mcu_tx_lock);
 
 	if (wait_for_completion_timeout(&n_mcu_priv.cmd_complete,
-					msecs_to_jiffies(CMD_TIMEOUT))) {
+					msecs_to_jiffies(cmd->timeout))) {
 
 		if (!n_mcu_priv.transfer_failed) {
 			cmd->size = n_mcu_priv.rx_data_size;
@@ -447,10 +446,9 @@ static int n_mcu_execute_cmd_no_response(struct n_mcu_cmd* cmd)
 	ret = n_mcu_send_frame(&n_mcu_priv);
 
 err:
-	if (ret) {
-		atomic_set(&n_mcu_priv.transfer_in_progress, 0);
-		atomic_set(&n_mcu_priv.rx_ready, 1);
-	}
+	atomic_set(&n_mcu_priv.transfer_in_progress, 0);
+	atomic_set(&n_mcu_priv.rx_ready, 1);
+
 	spin_unlock(&n_mcu_tx_lock);
 	return ret;
 }

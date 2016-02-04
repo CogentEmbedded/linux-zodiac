@@ -236,6 +236,11 @@ static struct attribute_group zii_pic_hwmon_group;
 
 __ATTRIBUTE_GROUPS(zii_pic_hwmon);
 
+static const struct of_device_id zii_pic_hwmon_of_match[] = {
+	{ .compatible = "zii,pic-hwmon" },
+	{}
+};
+
 static int zii_pic_hwmon_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -246,6 +251,9 @@ static int zii_pic_hwmon_probe(struct platform_device *pdev)
 	int count, i, attr_idx = 0;
 
 	pr_debug("%s: enter\n", __func__);
+
+	if (!node)
+		return -ENODEV;
 
 	count = of_property_count_strings(node, "sensors");
 	if (count <= 0) {
@@ -294,11 +302,13 @@ static struct platform_driver zii_pic_hwmon_driver = {
 	.probe = zii_pic_hwmon_probe,
 	.driver = {
 		.name = ZII_PIC_NAME_HWMON,
+		.of_match_table = zii_pic_hwmon_of_match,
 	},
 };
 
 module_platform_driver(zii_pic_hwmon_driver);
 
+MODULE_DEVICE_TABLE(of, zii_pic_hwmon_of_match);
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Andrey Vostrikov <andrey.vostrikov@cogentembedded.com>");
 MODULE_DESCRIPTION("ZII PIC HWMON driver");

@@ -35,12 +35,20 @@ static void zii_pic_pwrbutton_report(void *pwrbutton, bool state)
 	input_sync(idev);
 }
 
+static const struct of_device_id zii_pic_pwrbutton_of_match[] = {
+	{ .compatible = "zii,pic-pwrbutton" },
+	{}
+};
+
 static int zii_pic_pwrbutton_probe(struct platform_device *pdev)
 {
 	struct input_dev *idev;
 	int ret;
 
 	pr_debug("%s: enter: dev->parent: %p\n", __func__, pdev->dev.parent);
+
+	if (!pdev->dev.of_node)
+		return -ENODEV;
 
 	if (!pdev->dev.parent)
 		return -EINVAL;
@@ -73,10 +81,12 @@ static struct platform_driver zii_pic_pwrbutton_driver = {
 	.probe		= zii_pic_pwrbutton_probe,
 	.driver		= {
 		.name	= ZII_PIC_NAME_PWRBUTTON,
+		.of_match_table = zii_pic_pwrbutton_of_match,
 	},
 };
 module_platform_driver(zii_pic_pwrbutton_driver);
 
+MODULE_DEVICE_TABLE(of, zii_pic_pwrbutton_of_match);
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Andrey Vostrikov <andrey.vostrikov@cogentembedded.com>");
 MODULE_DESCRIPTION("ZII PIC Power Button driver");

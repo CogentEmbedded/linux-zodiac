@@ -53,6 +53,7 @@ enum zii_pic_cmd_id {
 	ZII_PIC_CMD_BACKLIGHT,
 
 	/* PIC Bootloader commands */
+	ZII_PIC_CMD_JMP_TO_BOOTLOADER,
 	ZII_PIC_CMD_BOOTLOADER,
 
 	/* Add new command IDs here */
