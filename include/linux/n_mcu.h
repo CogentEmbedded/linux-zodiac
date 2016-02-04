@@ -31,7 +31,11 @@
 #define N_MCU_MAX_CMD_SIZE		64
 struct n_mcu_cmd {
 	size_t	size;
+	u32	timeout;
 	__u8	data[N_MCU_MAX_CMD_SIZE];
+	/* Nasty workaround for misbehaving firmware:
+	 * bootloader query command returns more than 64 bytes as response */
+	__u8	guard[4];
 };
 
 typedef void (*event_callback_t)(void *, struct n_mcu_cmd*);

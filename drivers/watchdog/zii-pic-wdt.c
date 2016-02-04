@@ -119,6 +119,11 @@ static int zii_pic_wdt_restart_handler(struct notifier_block *this,
 	return NOTIFY_DONE;
 }
 
+static const struct of_device_id zii_pic_wdt_of_match[] = {
+	{ .compatible = "zii,pic-watchdog" },
+	{}
+};
+
 static int zii_pic_wdt_probe(struct platform_device *pdev)
 {
 	struct zii_pic_wdt *adev;
@@ -126,6 +131,9 @@ static int zii_pic_wdt_probe(struct platform_device *pdev)
 	int ret;
 
 	pr_debug("%s: enter: dev->parent: %p\n", __func__, pdev->dev.parent);
+
+	if (!pdev->dev.of_node)
+		return -ENODEV;
 
 	if (!pdev->dev.parent)
 		return -EINVAL;
@@ -197,11 +205,13 @@ static struct platform_driver zii_pic_wdt_driver = {
 	.remove = zii_pic_wdt_remove,
 	.driver = {
 		.name = ZII_PIC_NAME_WATCHDOG,
+		.of_match_table = zii_pic_wdt_of_match,
 	},
 };
 
 module_platform_driver(zii_pic_wdt_driver);
 
+MODULE_DEVICE_TABLE(of, zii_pic_wdt_of_match);
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Andrey Vostrikov <andrey.vostrikov@cogentembedded.com>");
 MODULE_DESCRIPTION("ZII PIC Watchdog driver");

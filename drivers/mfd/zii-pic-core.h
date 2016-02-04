@@ -24,7 +24,9 @@
 #include <linux/zii-pic.h>
 #include <linux/n_mcu.h>
 
-#define ZII_PIC_EEPROM_PAGE_SIZE 32
+#define ZII_PIC_MCU_DEFAULT_CMD_TIMEOUT	100
+#define ZII_PIC_EEPROM_PAGE_SIZE	32
+#define ZII_PIC_BL_DATA_SIZE		56
 
 enum zii_pic_state {
 	PIC_STATE_UNKNOWN,

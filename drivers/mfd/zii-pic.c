@@ -161,6 +161,7 @@ int zii_pic_mcu_cmd(struct zii_pic_mfd *adev,
 	if (unlikely(data_size != adev->cmd[id].data_len))
 		return -EINVAL;
 
+	mcu_cmd.timeout = ZII_PIC_MCU_DEFAULT_CMD_TIMEOUT;
 	mcu_cmd.size = 2 + adev->cmd[id].data_len;
 	mcu_cmd.data[0] = adev->cmd[id].cmd_id;
 	mcu_cmd.data[1] = ack_id = atomic_inc_return(&adev->cmd_seqn);
@@ -229,8 +230,8 @@ int zii_pic_mcu_cmd_no_response(struct zii_pic_mfd *adev,
 	return adev->mcu_ops.cmd_no_response(&mcu_cmd);
 }
 
-int zii_pic_mcu_bl_cmd(struct zii_pic_mfd *adev,
-		enum zii_pic_bl_cmd_id id,
+static int zii_pic_mcu_bl_cmd(struct zii_pic_mfd *adev,
+		enum zii_pic_bl_cmd_id id, u32 timeout,
 		const u8 * const data, u8 data_size,
 		u8 **response, u8 *response_size)
 {
@@ -246,6 +247,7 @@ int zii_pic_mcu_bl_cmd(struct zii_pic_mfd *adev,
 		return 0;
 	}
 
+	mcu_cmd.timeout = timeout;
 	/* cmd id + ack + bl cmd id + data */
 	mcu_cmd.size = 3 + data_size;
 	mcu_cmd.data[0] = adev->cmd[ZII_PIC_CMD_BOOTLOADER].cmd_id;
@@ -495,7 +497,7 @@ static int zii_pic_query_device(struct zii_pic_mfd *adev)
 	pr_debug("%s: enter\n", __func__);
 
 	ret = zii_pic_mcu_bl_cmd(adev,
-		ZII_PIC_BL_CMD_QUERY_DEVICE,
+		ZII_PIC_BL_CMD_QUERY_DEVICE, 1000,
 		NULL, 0,
 		&response, &response_size);
 
@@ -513,11 +515,9 @@ static int zii_pic_erase_device(struct zii_pic_mfd *adev)
 	pr_debug("%s: enter\n", __func__);
 
 	return zii_pic_mcu_bl_cmd(adev,
-		ZII_PIC_BL_CMD_ERASE_APP,
-		NULL, 0,
-		NULL, NULL);
-
-	return 0;
+			ZII_PIC_BL_CMD_ERASE_APP, 7000,
+			NULL, 0,
+			NULL, NULL);
 }
 
 static int zii_pic_verify_firmware_chunk(struct zii_pic_mfd *adev,
@@ -534,11 +534,10 @@ static int zii_pic_verify_firmware_chunk(struct zii_pic_mfd *adev,
 	u8 response_size;
 	int ret;
 
-	/* DEBUG:*/
-	memcpy(&read_data, data, sizeof(*data));
+	pr_debug("%s: enter\n", __func__);
 
 	ret = zii_pic_mcu_bl_cmd(adev,
-		ZII_PIC_BL_CMD_READ_APP,
+		ZII_PIC_BL_CMD_READ_APP, 5000,
 		(const u8 * const)&read_data,
 		sizeof(read_data.address) + sizeof(read_data.size),
 		&response, &response_size);
@@ -546,8 +545,13 @@ static int zii_pic_verify_firmware_chunk(struct zii_pic_mfd *adev,
 	if (ret)
 		return ret;
 
-	if (memcmp(response, data, response_size))
+	if (memcmp(response, data, response_size)) {
+		print_hex_dump(KERN_ERR, "error verifying block: ", DUMP_PREFIX_OFFSET,
+				16, 1, response, response_size, true);
+		print_hex_dump(KERN_ERR, "fw block: ", DUMP_PREFIX_OFFSET,
+				16, 1, data, data->size + 5, true);
 		ret = -EIO;
+	}
 
 	kfree(response);
 
@@ -558,8 +562,9 @@ static int zii_pic_verify_firmware_eof(struct zii_pic_mfd *adev,
 		const struct firmware *firmware)
 {
 	/* Everything is fine so far, send complete command to PIC */
+	pr_debug("%s: going to commit changes\n", __func__);
 	return zii_pic_mcu_bl_cmd(adev,
-		ZII_PIC_BL_CMD_PROGRAM_COMPLETE,
+		ZII_PIC_BL_CMD_PROGRAM_COMPLETE, 2000,
 		NULL, 0, NULL, NULL);
 }
 
@@ -567,8 +572,9 @@ static int zii_pic_upload_firmware_chunk(struct zii_pic_mfd *adev,
 		struct zii_pic_fw_data *data)
 {
 	return zii_pic_mcu_bl_cmd(adev,
-		ZII_PIC_BL_CMD_PROGRAM_DEVICE,
-		(const u8 * const)data, sizeof(*data),
+		ZII_PIC_BL_CMD_PROGRAM_DEVICE, 1000,
+		(const u8 * const)data,
+		sizeof(data->address) + sizeof(data->size) + data->size,
 		NULL, NULL);
 }
 
@@ -586,20 +592,23 @@ static int zii_pic_process_firmware(struct zii_pic_mfd *adev,
 		zii_pic_firmware_action_t action,
 		zii_pic_firmware_eof_t eof)
 {
-	struct zii_pic_fw_data data;
-	int total_read_bytes = 0;
-	int ret = 0;
 	unsigned char addr_has_changed = 0;
+	int total_read_bytes = 0;
+	int percent = 0;
+	int ret = 0;
 
 	pr_debug("%s: enter\n", __func__);
 
 	for (total_read_bytes = 0; total_read_bytes < firmware->size; ) {
+		struct zii_pic_fw_data data;
+		unsigned char chunk_data[64];
+		u32 chunk_address;
 		int read_bytes = 0;
 
 		read_bytes = parse_hex_line(
-				(u8 *) (firmware->data + total_read_bytes),
-				data.address,
-				data.payload,
+				(unsigned char *)(firmware->data + total_read_bytes),
+				(unsigned char *)&chunk_address,
+				chunk_data,
 				&data.size,
 				&addr_has_changed);
 
@@ -608,13 +617,21 @@ static int zii_pic_process_firmware(struct zii_pic_mfd *adev,
 
 		/* detect the end of file */
 		total_read_bytes += read_bytes;
+
+		if (total_read_bytes * 100 / firmware->size > percent)
+			pr_debug("%s: progress: %d%%, %d from %d\n", __func__,
+				++percent, total_read_bytes, firmware->size);
+
 		if (total_read_bytes == firmware->size) {
+			pr_debug("%s: completed\n", __func__);
 			if (eof)
 				ret = eof(adev, firmware);
 			break;
 		}
 
 		if (!addr_has_changed) {
+			*(u32*)data.address = be32_to_cpu(chunk_address) / 2;
+			memcpy(data.payload, chunk_data, data.size);
 			ret = action(adev, &data);
 			if (ret < 0)
 				break;
@@ -741,11 +758,18 @@ static ssize_t zii_pic_store_update_firmware(struct device *dev,
 	if (ret)
 		goto out;
 
-#ifndef CHECK_BL_CMD
-	ret = zii_pic_process_firmware(adev, firmware,
-			zii_pic_verify_firmware_chunk,
-			NULL);
-#else
+	ret = zii_pic_mcu_cmd_no_response(adev, ZII_PIC_CMD_JMP_TO_BOOTLOADER,
+			NULL, 0);
+	if (ret)
+		goto out;
+
+	/* wait until bootloader is ready to accept commands */
+	mdelay(3000);
+
+	ret = zii_pic_watchdog_disable(adev->dev);
+	if (ret)
+		return ret;
+
 	ret = zii_pic_query_device(adev);
 	if (ret)
 		goto out;
@@ -754,14 +778,13 @@ static ssize_t zii_pic_store_update_firmware(struct device *dev,
 	if (ret)
 		goto out;
 
-	pr_debug("%s: starting firmware upload\n", __func__);
 	ret = zii_pic_process_firmware(adev, firmware,
 			zii_pic_upload_firmware_chunk,
 			zii_pic_upload_firmware_eof);
 	if (ret)
 		goto out;
+
 	pr_debug("%s: firware updated successfully\n", __func__);
-#endif
 
 out:
 	release_firmware(firmware);
