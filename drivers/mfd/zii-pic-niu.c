@@ -75,6 +75,10 @@ struct zii_pic_cmd_desc zii_pic_niu_cmds[ZII_PIC_CMD_COUNT] = {
 	{0,    0, NULL},
 	/* ZII_PIC_CMD_BACKLIGHT */
 	{0,    0, NULL},
+	/* ZII_PIC_CMD_JMP_TO_BOOTLOADER */
+	{0x29, 0, NULL},
+	/* ZII_PIC_CMD_BOOTLOADER */
+	{0x2A, 0xff, NULL},
 };
 
 int zii_pic_niu_process_status_response(struct zii_pic_mfd *adev,

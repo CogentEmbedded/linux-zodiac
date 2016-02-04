@@ -18,7 +18,7 @@
  * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#define DEBUG
+/* #define DEBUG */
 
 #include <linux/backlight.h>
 #include <linux/module.h>
@@ -54,12 +54,20 @@ static struct backlight_properties zii_pic_bl_props = {
 	.brightness = 50,
 };
 
+static const struct of_device_id zii_pic_bl_of_match[] = {
+	{ .compatible = "zii,pic-backlight" },
+	{}
+};
+
 static int zii_pic_backlight_probe(struct platform_device *pdev)
 {
 	struct backlight_device *bd;
 	struct zii_pic_backlight *adev;
 
 	pr_debug("%s: enter: dev->parent: %p\n", __func__, pdev->dev.parent);
+
+	if (!pdev->dev.of_node)
+		return -ENODEV;
 
 	if (!pdev->dev.parent)
 		return -EINVAL;
@@ -86,9 +94,12 @@ static struct platform_driver zii_pic_backlight_driver = {
 	.probe		= zii_pic_backlight_probe,
 	.driver		= {
 		.name	= ZII_PIC_NAME_BACKLIGHT,
+		.of_match_table = zii_pic_bl_of_match,
 	},
 };
 module_platform_driver(zii_pic_backlight_driver);
+
+MODULE_DEVICE_TABLE(of, zii_pic_bl_of_match);
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Andrey Vostrikov <andrey.vostrikov@cogentembedded.com>");
 MODULE_DESCRIPTION("ZII PIC LCD Backlight driver");

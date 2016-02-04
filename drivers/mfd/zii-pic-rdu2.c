@@ -89,6 +89,10 @@ struct zii_pic_cmd_desc zii_pic_rdu2_cmds[ZII_PIC_CMD_COUNT] = {
 	{0xBE, 0, NULL},
 	/* ZII_PIC_CMD_BACKLIGHT */
 	{0xA6, 3, NULL},
+	/* ZII_PIC_CMD_JMP_TO_BOOTLOADER */
+	{0xB0, 0, NULL},
+	/* ZII_PIC_CMD_BOOTLOADER */
+	{0xB1, 0xff, NULL},
 };
 
 int zii_pic_rdu2_process_voltage_response(struct zii_pic_mfd *adev,
