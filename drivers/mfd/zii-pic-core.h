@@ -124,6 +124,8 @@ struct zii_pic_mfd {
 
 	struct zii_pic_version		bootloader_version;
 	struct zii_pic_version		firmware_version;
+	u32				firmware_start_address;
+	u32				firmware_end_address;
 
 	u8				eeprom_page[ZII_PIC_EEPROM_PAGE_SIZE];
 
@@ -133,7 +135,8 @@ struct zii_pic_mfd {
 	zii_pic_pwrbutton_callback_t	pwrbutton_event;
 	void				*pwrbutton;
 
-	atomic_t			fw_update_started;
+	atomic_t			fw_update_state;
+	int				fw_update_progress;
 };
 
 /* Convert 8.8 fixed point value multiplied by 1000 to integer.
