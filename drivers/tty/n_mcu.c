@@ -367,9 +367,20 @@ static int n_mcu_execute_cmd(struct n_mcu_cmd* cmd)
 	pr_debug("%s: enter\n", __func__);
 
 start:
-	if (wait_event_interruptible(n_mcu_priv.wait,
-		   !atomic_read(&n_mcu_priv.transfer_in_progress)))
-		return -ERESTART;
+	if ((ret = wait_event_interruptible_timeout(n_mcu_priv.wait,
+		!atomic_read(&n_mcu_priv.transfer_in_progress),
+		msecs_to_jiffies(cmd->timeout)))) {
+
+		if (!ret) {
+			if (!retry_count)
+				return -ETIMEDOUT;
+
+			retry_count--;
+			goto start;
+		}
+		if (ret < 0)
+			return ret;
+	}
 
 	spin_lock(&n_mcu_tx_lock);
 
