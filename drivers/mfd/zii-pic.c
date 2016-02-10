@@ -39,6 +39,7 @@
 #include "zii-pic-mezz.h"
 #include "zii-pic-esb.h"
 #include "zii-pic-rdu.h"
+#include "zii-pic-rdu2.h"
 
 #define DRIVER_NAME		"zii-pic-mfd"
 
@@ -60,6 +61,7 @@ const static struct of_device_id zii_pic_mfd_dt_ids[] = {
 	{ .compatible = "zii,pic-mezz", .data = (const void *)PIC_HW_ID_MEZZ},
 	{ .compatible = "zii,pic-esb", .data = (const void *)PIC_HW_ID_ESB},
 	{ .compatible = "zii,pic-rdu",  .data = (const void *)PIC_HW_ID_RDU},
+	{ .compatible = "zii,pic-rdu2",	.data = (const void *)PIC_HW_ID_RDU2},
 	{}
 };
 
@@ -117,20 +119,8 @@ static void zii_pic_event_handler(void *cookie, struct n_mcu_cmd *event)
 			16, 1, event->data, event->size, true);
 #endif
 
-	switch (adev->hw_id) {
-	case PIC_HW_ID_NIU:
-	case PIC_HW_ID_MEZZ:
-	case PIC_HW_ID_ESB:
-		/* No events expected on this HW type */
-		break;
-
-	case PIC_HW_ID_RDU:
-		zii_pic_rdu_event_handler(adev, event);
-		break;
-
-	default:
-		BUG();
-	}
+	if (adev->hw_ops.event_handler)
+		adev->hw_ops.event_handler(adev, event);
 }
 
 int zii_pic_mcu_cmd(struct zii_pic_mfd *adev,
@@ -188,7 +178,7 @@ int zii_pic_mcu_cmd(struct zii_pic_mfd *adev,
 	return 0;
 }
 
-static int zii_pic_mcu_cmd_no_response(struct zii_pic_mfd *adev,
+int zii_pic_mcu_cmd_no_response(struct zii_pic_mfd *adev,
 		enum zii_pic_cmd_id id, const u8 * const data, u8 data_size)
 {
 	struct n_mcu_cmd mcu_cmd;
@@ -231,36 +221,20 @@ static void zii_pic_get_reset_reason(struct zii_pic_mfd *adev)
 	}
 }
 
-static int zii_pic_get_status(struct zii_pic_mfd *adev)
+static inline int zii_pic_get_versions(struct zii_pic_mfd *adev)
 {
-	int ret;
-
-	switch (adev->hw_id) {
-	case PIC_HW_ID_NIU:
-	case PIC_HW_ID_RDU:
-		ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_GET_STATUS, NULL, 0);
-		break;
-
-	case PIC_HW_ID_MEZZ:
-	case PIC_HW_ID_ESB:
-		/* TODO: Looks like these HW variants do not implement
-		 * GET_STATUS command. Confirm and update accoedingly.
-		 * Requested FW and BL versions as a replacement */
-		ret = zii_pic_mcu_cmd(adev,
-				ZII_PIC_CMD_GET_FIRMWARE_VERSION, NULL, 0);
-		if (ret)
-			break;
-		ret = zii_pic_mcu_cmd(adev,
-				ZII_PIC_CMD_GET_BOOTLOADER_VERSION, NULL, 0);
-		break;
-
-	default:
-		BUG();
-		break;
-	}
-
-	return ret;
+	if (adev->hw_ops.get_versions)
+		return adev->hw_ops.get_versions(adev);
+	return 0;
 }
+
+static inline int zii_pic_get_status(struct zii_pic_mfd *adev)
+{
+	if (adev->hw_ops.get_status)
+		return adev->hw_ops.get_status(adev);
+	return 0;
+}
+
 static int zii_pic_configure(struct zii_pic_mfd *adev)
 {
 	struct ktermios ktermios;
@@ -289,28 +263,28 @@ static int zii_pic_configure(struct zii_pic_mfd *adev)
 
 	switch (adev->hw_id) {
 	case PIC_HW_ID_NIU:
+		zii_pic_niu_init(adev);
 		checksum_type = N_MCU_CHECKSUM_CCITT_FALSE;
-		adev->cmd = zii_pic_niu_cmds;
-		adev->checksum_size = 2;
 		break;
 
 	case PIC_HW_ID_MEZZ:
+		zii_pic_mezz_init(adev);
 		checksum_type = N_MCU_CHECKSUM_CCITT_FALSE;
-		adev->cmd = zii_pic_mezz_cmds;
-		adev->checksum_size = 2;
 		break;
 
 	case PIC_HW_ID_ESB:
+		zii_pic_esb_init(adev);
 		checksum_type = N_MCU_CHECKSUM_CCITT_FALSE;
-		adev->cmd = zii_pic_esb_cmds;
-		adev->checksum_size = 2;
 		break;
 
 	case PIC_HW_ID_RDU:
+		zii_pic_rdu_init(adev);
 		checksum_type = N_MCU_CHECKSUM_8B2C;
-		adev->cmd = zii_pic_rdu_cmds;
-		adev->checksum_size = 1;
-		adev->init = zii_pic_rdu_init;
+		break;
+
+	case PIC_HW_ID_RDU2:
+		zii_pic_rdu2_init(adev);
+		checksum_type = N_MCU_CHECKSUM_CCITT_FALSE;
 		break;
 
 	default:
@@ -334,13 +308,11 @@ static int zii_pic_configure(struct zii_pic_mfd *adev)
 	if (ret)
 		return ret;
 
-	zii_pic_get_reset_reason(adev);
+	ret = zii_pic_get_versions(adev);
+	if (ret)
+		return ret;
 
-	if (adev->init) {
-		ret = adev->init(adev);
-		if (ret)
-			return ret;
-	}
+	zii_pic_get_reset_reason(adev);
 
 	ret = mfd_add_devices(adev->dev, -1, zii_pic_devices,
 			ARRAY_SIZE(zii_pic_devices), NULL, 0, NULL);
@@ -354,15 +326,22 @@ static void zii_pic_state_work(struct work_struct *work)
 {
 	struct zii_pic_mfd *adev =
 		container_of(work, struct zii_pic_mfd, state_work.work);
+	struct uart_slave *slave = container_of(adev->dev, struct uart_slave, dev);
 	int ret;
 
 	pr_debug("%s: enter\n", __func__);
 
 	switch(adev->state) {
 	case PIC_STATE_UNKNOWN:
-		/* FIXME: define generic name similar to /dev/console
-		 * or find a way to get real device name to open */
-		adev->port_fd = sys_open((const char __user *) "/dev/ttymxc2",
+	{
+		char *tty_dev_name = kasprintf(GFP_KERNEL, "/dev/%s",
+					dev_name(slave->tty_dev));
+		if (!tty_dev_name) {
+			pr_err("%s: not enough memory for name", __func__);
+			return;
+		}
+		adev->port_fd = sys_open(
+				(const char __user *) tty_dev_name,
 				O_RDWR | O_NOCTTY, 0);
 		if (adev->port_fd < 0) {
 			pr_err("Warning: unable to open serial port: %ld\n",
@@ -372,8 +351,9 @@ static void zii_pic_state_work(struct work_struct *work)
 			schedule_delayed_work(&adev->state_work,
 				msecs_to_jiffies(PROBE_DEFER_TIMEOUT));
 		}
+		kfree(tty_dev_name);
 		break;
-
+	}
 	case PIC_STATE_OPENED:
 		ret = zii_pic_configure(adev);
 		if (ret) {
@@ -427,53 +407,42 @@ static int zii_pic_uart_open(struct tty_struct *tty, struct file *filp)
 	return 0;
 }
 
-static ssize_t zii_pic_show_version(struct device *dev,
+static ssize_t zii_pic_show_fw_version(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
 	struct zii_pic_mfd *adev = dev_get_drvdata(dev);
-	ssize_t ret;
 
 	pr_debug("%s: enter\n", __func__);
 
-	switch (adev->hw_id) {
-	case PIC_HW_ID_NIU:
-		ret = snprintf(buf, PAGE_SIZE, "PIC HW type: NIU\n");
-		break;
-
-	case PIC_HW_ID_MEZZ:
-		ret = snprintf(buf, PAGE_SIZE, "PIC HW type: MEZZ\n");
-		break;
-
-	case PIC_HW_ID_ESB:
-		ret = snprintf(buf, PAGE_SIZE, "PIC HW type: ESB\n");
-		break;
-
-	case PIC_HW_ID_RDU:
-		ret = snprintf(buf, PAGE_SIZE, "PIC HW type: RDU\n");
-		break;
-
-	default:
-		return 0;
-	}
-
-	buf += ret;
-	ret += snprintf(buf, PAGE_SIZE - ret,
-			"Bootloader: %d.%d.%d.%c%c\nFirmware: %d.%d.%d.%c%c\n",
-			adev->bootloader_version.hw,
-			adev->bootloader_version.major,
-			adev->bootloader_version.minor,
-			adev->bootloader_version.letter_1,
-			adev->bootloader_version.letter_2,
+	return snprintf(buf, PAGE_SIZE,
+			"%d.%d.%d.%c%c\n",
 			adev->firmware_version.hw,
 			adev->firmware_version.major,
 			adev->firmware_version.minor,
 			adev->firmware_version.letter_1,
 			adev->firmware_version.letter_2);
-
-	return ret;
 }
 
-static DEVICE_ATTR(version, S_IRUSR | S_IRGRP, zii_pic_show_version, NULL);
+static DEVICE_ATTR(part_number_firmware, S_IRUSR | S_IRGRP | S_IROTH,
+		zii_pic_show_fw_version, NULL);
+
+static ssize_t zii_pic_show_bl_version(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct zii_pic_mfd *adev = dev_get_drvdata(dev);
+
+	pr_debug("%s: enter\n", __func__);
+
+	return snprintf(buf, PAGE_SIZE,
+			"%d.%d.%d.%c%c\n",
+			adev->bootloader_version.hw,
+			adev->bootloader_version.major,
+			adev->bootloader_version.minor,
+			adev->bootloader_version.letter_1,
+			adev->bootloader_version.letter_2);
+}
+static DEVICE_ATTR(part_number_bootloader, S_IRUSR | S_IRGRP | S_IROTH,
+		zii_pic_show_bl_version, NULL);
 
 static ssize_t zii_pic_show_reset_reason(struct device *dev,
 	struct device_attribute *attr, char *buf)
@@ -492,28 +461,11 @@ static ssize_t zii_pic_show_boot_source(struct device *dev,
 {
 	struct zii_pic_mfd *adev = dev_get_drvdata(dev);
 
-	switch (adev->hw_id) {
-	case PIC_HW_ID_NIU:
-	case PIC_HW_ID_MEZZ:
-	case PIC_HW_ID_ESB:
-	{
+	if (adev->hw_ops.get_boot_source) {
 		int ret;
-		u8 dummy;
-		ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_GET_BOOT_SOURCE,
-				&dummy, sizeof(dummy));
+		ret = adev->hw_ops.get_boot_source(adev);
 		if (ret)
 			return ret;
-		break;
-	}
-
-	case PIC_HW_ID_RDU:
-	case PIC_HW_ID_RDU2:
-		/* nothing to do, boot source already set on init by
-		 * get status handler or updated by attribute store */
-		break;
-
-	default:
-		BUG();
 	}
 
 	return snprintf(buf, PAGE_SIZE, "%d\n", adev->boot_source);
@@ -523,46 +475,22 @@ static ssize_t zii_pic_store_boot_source(struct device *dev,
 		struct device_attribute *attr,  const char *buf, size_t count)
 {
 	struct zii_pic_mfd *adev = dev_get_drvdata(dev);
-	u8 data;
+	u8 boot_src;
 	int ret;
-	ret = kstrtou8(buf, 0, &data);
+
+	ret = kstrtou8(buf, 0, &boot_src);
 	if (ret)
 		return ret;
 
-	/* NIU/ESB/MEZZ do not have SD-card to boot from */
-	if (data > PIC_BOOT_SRC_LAST)
+	if (boot_src > PIC_BOOT_SRC_LAST)
 		return -EINVAL;
 
-	switch (adev->hw_id) {
-	case PIC_HW_ID_NIU:
-	case PIC_HW_ID_MEZZ:
-	case PIC_HW_ID_ESB:
-		/* NIU/ESB/MEZZ do not have SD-card to boot from */
-		if (data == PIC_BOOT_SRC_SD)
-			return -EINVAL;
+	if (!adev->hw_ops.set_boot_source)
+		return -ENOTSUPP;
 
-		ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_SET_BOOT_SOURCE,
-				&data, sizeof(data));
-		if (ret)
-			return ret;
-
-		break;
-
-	case PIC_HW_ID_RDU:
-		ret = zii_pic_rdu_set_boot_source(adev, data);
-		if (ret)
-			return ret;
-		break;
-
-	case PIC_HW_ID_RDU2:
-		/* TODO: */
-		break;
-
-	default:
-		BUG();
-	}
-
-	adev->boot_source = data;
+	ret = adev->hw_ops.set_boot_source(adev, boot_src);
+	if (ret)
+		return ret;
 
 	return count;
 }
@@ -571,7 +499,8 @@ static DEVICE_ATTR(boot_source, S_IRUSR | S_IWUSR | S_IRGRP,
 		zii_pic_show_boot_source, zii_pic_store_boot_source);
 
 static struct attribute *zii_pic_dev_attrs[] = {
-	&dev_attr_version.attr,
+	&dev_attr_part_number_firmware.attr,
+	&dev_attr_part_number_bootloader.attr,
 	&dev_attr_reset_reason.attr,
 	&dev_attr_boot_source.attr,
 	NULL
@@ -761,7 +690,8 @@ int zii_pic_watchdog_ping(struct device *pic_dev)
 	return ret;
 }
 
-int zii_pic_watchdog_set_timeout(struct device *pic_dev, unsigned int timeout)
+int zii_pic_watchdog_set_timeout(struct device *pic_dev,
+		unsigned int timeout)
 {
 	struct zii_pic_mfd *adev = dev_get_drvdata(pic_dev);
 	union zii_pic_cmd_data_set_wdt data;
@@ -790,18 +720,19 @@ int zii_pic_watchdog_set_timeout(struct device *pic_dev, unsigned int timeout)
 void zii_pic_watchdog_reset(struct device *pic_dev, bool hw_recovery)
 {
 	struct zii_pic_mfd *adev = dev_get_drvdata(pic_dev);
-	u8 data = 1;
 	int ret;
 
 	pr_debug("%s: enter\n", __func__);
+
+	if (!adev->hw_ops.reset)
+		return;
 
 	/* There is no way to get normal processing of response for this
 	 * command due to disabled scheduling when reset handler is called.
 	 * So repeat until it is successfully executed or watchdog
 	 * triggers reset */
 	for (;;) {
-		ret = zii_pic_mcu_cmd_no_response(adev, ZII_PIC_CMD_RESET,
-					&data, sizeof(data));
+		ret = adev->hw_ops.reset(adev);
 		if (ret)
 			pr_emerg("%s: failed to reset (err = %d)\n",
 				__func__, ret);
@@ -817,26 +748,13 @@ int zii_pic_hwmon_read_sensor(struct device *pic_dev,
 			      enum zii_pic_sensor id, int *val)
 {
 	struct zii_pic_mfd *adev = dev_get_drvdata(pic_dev);
-	int ret;
 
 	pr_debug("%s: enter\n", __func__);
 
-	switch (adev->hw_id) {
-	case PIC_HW_ID_NIU:
-	case PIC_HW_ID_MEZZ:
-	case PIC_HW_ID_ESB:
-		ret = zii_pic_niu_hwmon_read_sensor(adev, id, val);
-		break;
+	if (!adev->hw_ops.read_sensor)
+		return -ENOTSUPP;
 
-	case PIC_HW_ID_RDU:
-		ret = zii_pic_rdu_hwmon_read_sensor(adev, id, val);
-		break;
-
-	default:
-		BUG();
-	}
-
-	return ret;
+	return adev->hw_ops.read_sensor(adev, id, val);
 }
 
 static int zii_pic_eeprom_read_page(struct zii_pic_mfd *adev,

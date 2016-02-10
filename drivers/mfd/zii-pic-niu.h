@@ -3,7 +3,7 @@
  * PIC MCU that is connected via dedicated UART port
  * (NIU board specific code)
  *
- * Copyright (C) 2015 Andrey Vostrikov <andrey.vostrikov@cogentembedded.com>
+ * Copyright (C) 2015-2016 Andrey Vostrikov <andrey.vostrikov@cogentembedded.com>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -71,8 +71,15 @@ int zii_pic_niu_process_eeprom_write(struct zii_pic_mfd *adev,
 int zii_pic_niu_process_get_boot_source(struct zii_pic_mfd *adev,
 			u8 *data, u8 size);
 
+int zii_pic_niu_get_status(struct zii_pic_mfd *adev);
+int zii_pic_niu_get_versions(struct zii_pic_mfd *adev);
+int zii_pic_niu_reset(struct zii_pic_mfd *adev);
+int zii_pic_niu_get_boot_source(struct zii_pic_mfd *adev);
+int zii_pic_niu_set_boot_source(struct zii_pic_mfd *adev,
+					enum zii_pic_boot_source boot_src);
 int zii_pic_niu_hwmon_read_sensor(struct zii_pic_mfd *adev,
 			enum zii_pic_sensor id, int *val);
+int zii_pic_niu_init(struct zii_pic_mfd *adev);
 
 extern struct zii_pic_cmd_desc zii_pic_niu_cmds[ZII_PIC_CMD_COUNT];
 

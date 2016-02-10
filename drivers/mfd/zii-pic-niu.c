@@ -3,7 +3,7 @@
  * PIC MCU that is connected via dedicated UART port
  * (NIU board specific code)
  *
- * Copyright (C) 2015 Andrey Vostrikov <andrey.vostrikov@cogentembedded.com>
+ * Copyright (C) 2015-2016 Andrey Vostrikov <andrey.vostrikov@cogentembedded.com>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -49,6 +49,10 @@ struct zii_pic_cmd_desc zii_pic_niu_cmds[ZII_PIC_CMD_COUNT] = {
 	{0,    0, NULL},
 	/* ZII_PIC_CMD_GET_3V3_READING */
 	{0,    0, NULL},
+	/* ZII_PIC_CMD_GET_VOLTAGE */
+	{0,    0, NULL},
+	/* ZII_PIC_CMD_GET_CURRENT */
+	{0,    0, NULL},
 	/* ZII_PIC_CMD_GET_TEMPERATURE */
 	{0x19, 0, zii_pic_niu_process_temperature},
 	/* ZII_PIC_CMD_EEPROM_READ */
@@ -64,9 +68,9 @@ struct zii_pic_cmd_desc zii_pic_niu_cmds[ZII_PIC_CMD_COUNT] = {
 	/* ZII_PIC_CMD_DDS_EEPROM_WRITE */
 	{0,    0, NULL},
 	/* ZII_PIC_CMD_GET_BOOT_SOURCE */
-	{0x14, 1, zii_pic_niu_process_get_boot_source},
+	{0x14, 2, zii_pic_niu_process_get_boot_source},
 	/* ZII_PIC_CMD_SET_BOOT_SOURCE */
-	{0x14, 1, NULL},
+	{0x14, 2, NULL},
 	/* ZII_PIC_CMD_LCD_BOOT_ENABLE */
 	{0,    0, NULL},
 	/* ZII_PIC_CMD_BACKLIGHT */
@@ -78,7 +82,6 @@ int zii_pic_niu_process_status_response(struct zii_pic_mfd *adev,
 {
 	struct zii_pic_niu_status_info *status =
 			(struct zii_pic_niu_status_info*)data;
-	int boot_device;
 
 	pr_debug("%s: enter\n", __func__);
 
@@ -117,18 +120,8 @@ int zii_pic_niu_process_status_response(struct zii_pic_mfd *adev,
 	pr_debug("\tEEPROM: %c\n", status->i2c_device_status & 4 ? 'Y' : 'N');
 	pr_debug("\tI/O Expander: %c\n", status->i2c_device_status & 8 ? 'Y' : 'N');
 
-	boot_device = status->general_status >> 2 & 0x03;
-	switch(boot_device) {
-	case 0:
-		pr_debug("Boot device: SD\n");
-		break;
-	case 1:
-		pr_debug("Boot device: eMMC\n");
-		break;
-	case 2:
-		pr_debug("Boot device: NOR Flash\n");
-		break;
-	}
+	adev->boot_source = (status->general_status >> 2) & 0x03;
+
 	return 0;
 }
 
@@ -233,7 +226,7 @@ int zii_pic_niu_process_temperature(struct zii_pic_mfd *adev,
 		return -EINVAL;
 
 	/* convert to millidegree Celsius */
-	adev->temperature = (*(u16*)data) * 500;
+	adev->sensor_temperature = (*(u16*)data) * 500;
 
 	return 0;
 }
@@ -312,6 +305,50 @@ int zii_pic_niu_process_get_boot_source(struct zii_pic_mfd *adev,
 	return 0;
 }
 
+int zii_pic_niu_get_status(struct zii_pic_mfd *adev)
+{
+	return zii_pic_mcu_cmd(adev, ZII_PIC_CMD_GET_STATUS, NULL, 0);
+}
+
+int zii_pic_niu_get_versions(struct zii_pic_mfd *adev)
+{
+	int ret;
+
+	pr_debug("%s: enter\n", __func__);
+
+	ret = zii_pic_mcu_cmd(adev,
+			ZII_PIC_CMD_GET_FIRMWARE_VERSION, NULL, 0);
+	if (ret)
+		return ret;
+
+	ret = zii_pic_mcu_cmd(adev,
+			ZII_PIC_CMD_GET_BOOTLOADER_VERSION, NULL, 0);
+	return ret;
+}
+
+int zii_pic_niu_reset(struct zii_pic_mfd *adev)
+{
+	u8 data = 1;
+	return zii_pic_mcu_cmd_no_response(adev, ZII_PIC_CMD_RESET,
+					   &data, sizeof(data));
+}
+
+int zii_pic_niu_get_boot_source(struct zii_pic_mfd *adev)
+{
+	u8 data[2] = {0, 0};
+	return zii_pic_mcu_cmd(adev, ZII_PIC_CMD_GET_BOOT_SOURCE,
+			data, sizeof(data));
+}
+
+int zii_pic_niu_set_boot_source(struct zii_pic_mfd *adev,
+					enum zii_pic_boot_source boot_src)
+{
+	u8 data[2] = {1, boot_src};
+	return zii_pic_mcu_cmd(adev, ZII_PIC_CMD_SET_BOOT_SOURCE,
+			data, sizeof(data));
+}
+
+
 int zii_pic_niu_hwmon_read_sensor(struct zii_pic_mfd *adev,
 			enum zii_pic_sensor id, int *val)
 {
@@ -350,7 +387,7 @@ int zii_pic_niu_hwmon_read_sensor(struct zii_pic_mfd *adev,
 		ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_GET_TEMPERATURE, NULL, 0);
 		if (ret)
 			break;
-		*val = adev->temperature;
+		*val = adev->sensor_temperature;
 		break;
 
 	default:
@@ -359,3 +396,19 @@ int zii_pic_niu_hwmon_read_sensor(struct zii_pic_mfd *adev,
 	return ret;
 }
 
+int zii_pic_niu_init(struct zii_pic_mfd *adev)
+{
+	adev->cmd = zii_pic_niu_cmds;
+	adev->checksum_size = 2;
+
+	adev->hw_ops.event_handler = NULL;
+	adev->hw_ops.get_status = zii_pic_niu_get_status;
+	adev->hw_ops.get_versions = zii_pic_niu_get_versions;
+	adev->hw_ops.get_boot_source = zii_pic_niu_get_boot_source;
+	adev->hw_ops.set_boot_source = zii_pic_niu_set_boot_source;
+	adev->hw_ops.reset = zii_pic_niu_reset;
+	adev->hw_ops.recovery_reset = NULL;
+	adev->hw_ops.read_sensor = zii_pic_niu_hwmon_read_sensor;
+
+	return 0;
+}

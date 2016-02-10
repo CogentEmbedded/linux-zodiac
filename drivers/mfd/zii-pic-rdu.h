@@ -3,7 +3,7 @@
  * PIC MCU that is connected via dedicated UART port
  * (RDU board specific code)
  *
- * Copyright (C) 2015 Andrey Vostrikov <andrey.vostrikov@cogentembedded.com>
+ * Copyright (C) 2015-2016 Andrey Vostrikov <andrey.vostrikov@cogentembedded.com>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -72,6 +72,8 @@ int zii_pic_rdu_process_dds_eeprom_read(struct zii_pic_mfd *adev,
 
 int zii_pic_rdu_process_dds_eeprom_write(struct zii_pic_mfd *adev,
 				u8 *data, u8 size);
+int zii_pic_rdu_process_bl_response(struct zii_pic_mfd *adev,
+				u8 *data, u8 size);
 
 void zii_pic_rdu_event_handler(struct zii_pic_mfd *adev,
 		struct n_mcu_cmd *event);
@@ -83,6 +85,8 @@ int zii_pic_rdu_set_boot_source(struct zii_pic_mfd *adev,
 		enum zii_pic_boot_source source);
 
 int zii_pic_rdu_init(struct zii_pic_mfd *adev);
+
+int zii_pic_rdu_recovery_reset(struct zii_pic_mfd *adev);
 
 extern struct zii_pic_cmd_desc zii_pic_rdu_cmds[ZII_PIC_CMD_COUNT];
 
