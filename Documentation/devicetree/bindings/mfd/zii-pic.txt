@@ -1,0 +1,96 @@
+Zodiac Inflight Infotainment supervisory PIC controller family
+
+Supervisory PIC controller is connected to application processor via
+dedicated UART and implements following features:
+ - HW reset
+ - watchdog
+ - LEDs
+ - LCD backlight
+ - EEPROM(s)
+ - external button(s)
+ - sensors (voltage, temperature, current, orientation, etc)
+ - Boot source selection
+
+Required properties:
+- compatible - should contain:
+ * "zii,pic-rdu" - for RDU HW variant
+ * "zii,pic-niu" - for NIU HW variant
+ * "zii,pic-mezz" - for MEZZ HW variant
+ * "zii,pic-esb" - for ESB HW variant
+
+- current-speed - UART line speed
+
+Sub-devices:
+ - EEPROMs
+   * compatible:
+      = "zii,pic-main-eeprom"
+      = "zii,pic-dds-eeprom"
+   * address and size cells to describe EEPROM layout for NVMEM
+ - Watchdog
+   * compatible:
+     = "zii,pic-watchdog"
+ - HWMON
+   * compatible:
+     = "zii,pic-hwmon"
+   * sensors:
+     =	"28V", "12V", "5V", "3V3", "TEMPERATURE", "TEMPERATURE_2", "BACKLIGHT_CURRENT"
+
+
+Example:
+
+&uart3 {
+        pinctrl-names = "default";
+        pinctrl-0 = <&pinctrl_uart3>;
+        status = "okay";
+        pic {
+                compatible = "zii,pic-rdu";
+                current-speed = <38400>;
+                status = "okay";
+
+                main_eeprom {
+                        compatible = "zii,pic-main-eeprom";
+                        #address-cells = <1>;
+                        #size-cells = <1>;
+                        status = "okay";
+
+                        eeprom_format: eeprom-format@0 {
+                                reg = <0x00 2>;
+                        };
+                        wdt_timeout: wdt-timeout@81 {
+                                reg = <0x81 2>;
+                        };
+                        wdt_rmi: wdt-rmi@84 {
+                                reg = <0x84 2>;
+                        };
+                        max_failed_boots: max-failed-boots@8E {
+                                reg = <0x8E 2>;
+                        };
+                };
+
+                dds_eeprom {
+                        compatible = "zii,pic-dds-eeprom";
+                        #address-cells = <1>;
+                        #size-cells = <1>;
+                        status = "okay";
+                };
+
+                watchdog {
+                        compatible = "zii,pic-watchdog";
+                        status = "okay";
+                        nvmem-cells = <&wdt_rmi
+                                        &wdt_timeout>;
+
+                        nvmem-cell-names = "wdt_rmi",
+                                        "wdt_timeout";
+                };
+
+                hwmon {
+                        compatible = "zii,pic-hwmon";
+                        sensors = "28V",
+                                "TEMPERATURE",
+                                "TEMPERATURE_2",
+                                "BACKLIGHT_CURRENT";
+                        status = "okay";
+                };
+        };
+};

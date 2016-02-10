@@ -366,7 +366,7 @@ config TRACE_SINK
 	  "Trace data router for MIPI P1149.7 cJTAG standard".
 
 config N_MCU
-	tristate "Generic microcontroller unit support"
+	bool "Generic microcontroller unit support"
 	default n
 	select CRC_CCITT
 	help
