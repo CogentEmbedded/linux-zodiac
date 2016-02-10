@@ -78,4 +78,11 @@ config NVMEM_VF610_OCOTP
 	  This driver can also be build as a module. If so, the module will
 	  be called nvmem-vf610-ocotp.
 
+config ZII_PIC_EEPROM
+	bool "ZII PIC EEPROM Support"
+	depends on MFD_ZII_PIC
+	select REGMAP
+	help
+	  Say y here to enable ZII PIC EEPROM support.
+
 endif
