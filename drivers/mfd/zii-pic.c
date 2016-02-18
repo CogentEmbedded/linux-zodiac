@@ -18,7 +18,7 @@
  * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
-/* #define DEBUG */
+#define DEBUG
 /* #define VERBOSE_DEBUG */
 
 #include <linux/delay.h>
@@ -77,16 +77,6 @@ typedef int (*zii_pic_firmware_action_t)(struct zii_pic_mfd *adev,
 		struct zii_pic_fw_data *data);
 typedef int (*zii_pic_firmware_eof_t)(struct zii_pic_mfd *adev,
 		const struct firmware *firmware);
-
-union zii_pic_cmd_data_set_wdt {
-	struct {
-		u8	get;
-		u8	enable;
-		u8	timeout;
-	};
-	u8	buf[3];
-} __packed;
-
 
 const static struct of_device_id zii_pic_mfd_dt_ids[] = {
 	{ .compatible = "zii,pic-niu",  .data = (const void *)PIC_HW_ID_NIU},
@@ -176,8 +166,10 @@ int zii_pic_mcu_cmd(struct zii_pic_mfd *adev,
 		return 0;
 	}
 
-	if (unlikely(data_size != adev->cmd[id].data_len))
+	if (unlikely(data_size != adev->cmd[id].data_len)) {
+		pr_err("%s: fuckup, size is %d instead of %d\n", __func__, data_size, adev->cmd[id].data_len);
 		return -EINVAL;
+	}
 
 retry:
 	mcu_cmd.timeout = ZII_PIC_MCU_DEFAULT_CMD_TIMEOUT;
@@ -1022,74 +1014,22 @@ static int zii_pic_mfd_remove(struct device *dev)
 	return 0;
 }
 
-int zii_pic_watchdog_enable(struct device *pic_dev)
+int zii_pic_watchdog_enable(struct device *pic_dev, u16 timeout)
 {
 	struct zii_pic_mfd *adev = dev_get_drvdata(pic_dev);
-	union zii_pic_cmd_data_set_wdt data;
-	int ret;
 
 	pr_debug("%s: enter\n", __func__);
 
-	data.get = 0;
-	data.enable = 1;
-	data.timeout = adev->watchdog_timeout;
-
-	ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_SW_WDT_SET,
-			      data.buf, sizeof(data));
-	if (ret)
-		pr_err("Failed to enable watchdog (err = %d)\n", ret);
-	else
-		adev->watchdog_enabled = 1;
-
-	return ret;
+	return adev->hw_ops.enable_watchdog(adev, timeout);
 }
 
 int zii_pic_watchdog_disable(struct device *pic_dev)
 {
 	struct zii_pic_mfd *adev = dev_get_drvdata(pic_dev);
-	union zii_pic_cmd_data_set_wdt data;
-	int ret;
 
 	pr_debug("%s: enter\n", __func__);
 
-	data.get = 0;
-	data.enable = 0;
-	data.timeout = 0;
-
-	ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_SW_WDT_SET,
-			      data.buf, sizeof(data));
-	if (ret)
-		pr_err("Failed to disable watchdog (err = %d)\n", ret);
-	else
-		adev->watchdog_enabled = 0;
-
-	return ret;
-}
-
-int zii_pic_watchdog_get_status(struct device *pic_dev)
-{
-	struct zii_pic_mfd *adev = dev_get_drvdata(pic_dev);
-	u8 data = 1;
-	int ret;
-
-	pr_debug("%s: enter\n", __func__);
-
-	/* Special case for NIU HW as firmware does not respond properly
-	 * Assume watchdog is enabled and has default timeout
-	 */
-	if (adev->hw_id == PIC_HW_ID_NIU) {
-		adev->watchdog_enabled = 1;
-		adev->watchdog_timeout = ZII_PIC_WDT_DEFAULT_TIMEOUT;
-		return 0;
-	}
-
-	ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_SW_WDT_GET,
-				&data, sizeof(data));
-
-	if (ret)
-		pr_err("Failed to get watchdog status (err = %d)\n", ret);
-
-	return ret;
+	return adev->hw_ops.disable_watchdog(adev);
 }
 
 int zii_pic_watchdog_ping(struct device *pic_dev)
@@ -1102,33 +1042,6 @@ int zii_pic_watchdog_ping(struct device *pic_dev)
 	ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_PET_WDT, NULL, 0);
 	if (ret)
 		pr_err("Failed to pet the dog (err = %d)\n", ret);
-
-	return ret;
-}
-
-int zii_pic_watchdog_set_timeout(struct device *pic_dev,
-		unsigned int timeout)
-{
-	struct zii_pic_mfd *adev = dev_get_drvdata(pic_dev);
-	union zii_pic_cmd_data_set_wdt data;
-	int ret;
-
-	pr_debug("%s: enter\n", __func__);
-
-	if (timeout < ZII_PIC_WDT_MIN_TIMEOUT ||
-	    timeout > ZII_PIC_WDT_MAX_TIMEOUT)
-		return -EINVAL;
-
-	data.get = 0;
-	data.enable = adev->watchdog_enabled;
-	data.timeout = timeout;
-
-	ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_SW_WDT_SET,
-			data.buf, sizeof(data));
-	if (ret)
-		pr_err("Failed to set watchdog timeout (err = %d)\n", ret);
-	else
-		adev->watchdog_timeout = timeout;
 
 	return ret;
 }
@@ -1159,6 +1072,19 @@ void zii_pic_watchdog_reset(struct device *pic_dev, bool hw_recovery)
 		pr_emerg("%s: reset cmd timed out, repeat\n", __func__);
 	}
 }
+
+void zii_pic_watchdog_get_timeout_range(struct device *pic_dev,
+	unsigned int *min_timeout, unsigned int *max_timeout,
+	unsigned int *default_timeout)
+{
+	struct zii_pic_mfd *adev = dev_get_drvdata(pic_dev);
+
+	pr_debug("%s: enter\n", __func__);
+
+	adev->hw_ops.get_watchdog_timeout_range(min_timeout,
+			max_timeout, default_timeout);
+}
+
 
 int zii_pic_hwmon_read_sensor(struct device *pic_dev,
 			      enum zii_pic_sensor id, int *val)

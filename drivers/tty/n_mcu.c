@@ -38,7 +38,7 @@
  * get/set function pointers to send data, and receive unsolicited notifications.
  * 
  */
-/* #define DEBUG */
+#define DEBUG
 
 #include <asm/unaligned.h>
 #include <linux/crc-ccitt.h>

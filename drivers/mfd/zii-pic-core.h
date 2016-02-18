@@ -83,6 +83,10 @@ struct zii_pic_hw_ops {
 	int (*recovery_reset)(struct zii_pic_mfd *adev);
 	int (*read_sensor)(struct zii_pic_mfd *adev,
 			enum zii_pic_sensor id, int *val);
+	void (*get_watchdog_timeout_range)(unsigned int *min_timeout,
+		unsigned int *max_timeout, unsigned int *default_timeout);
+	int (*enable_watchdog)(struct zii_pic_mfd *adev, u16 timeout);
+	int (*disable_watchdog)(struct zii_pic_mfd *adev);
 };
 
 /*
@@ -105,8 +109,6 @@ struct zii_pic_mfd {
 	struct tty_struct		*tty;
 	speed_t				baud;
 
-	u8				watchdog_timeout;
-	u8				watchdog_enabled;
 	u8				reset_reason;
 	u8				boot_source;
 

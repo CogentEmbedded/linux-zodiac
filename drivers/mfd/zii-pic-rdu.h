@@ -29,6 +29,19 @@
 #define		ZII_PIC_RDU_EVENT_ORIENTATION		0xE2
 #define 	ZII_PIC_RDU_RESPONSE_ORIENTATION	0xE3
 
+
+#define ZII_PIC_RDU_WDT_DEFAULT_TIMEOUT		180
+#define ZII_PIC_RDU_WDT_MIN_TIMEOUT		60
+#define ZII_PIC_RDU_WDT_MAX_TIMEOUT		300
+
+union zii_pic_rdu_wdt {
+	struct {
+		u8	enable;
+		u16	timeout;
+	} __packed;
+	u8	buf[3];
+};
+
 struct zii_pic_rdu_status_info_common {
 	struct zii_pic_version bl;
 	struct zii_pic_version fw;
@@ -81,6 +94,12 @@ int zii_pic_rdu_hwmon_read_sensor(struct zii_pic_mfd *adev,
 
 int zii_pic_rdu_set_boot_source(struct zii_pic_mfd *adev,
 		enum zii_pic_boot_source source);
+
+void zii_pic_rdu_watchdog_get_timeout_range(unsigned int *min_timeout,
+	unsigned int *max_timeout, unsigned int *default_timeout);
+
+int zii_pic_rdu_watchdog_enable(struct zii_pic_mfd *adev, u16 timeout);
+int zii_pic_rdu_watchdog_disable(struct zii_pic_mfd *adev);
 
 int zii_pic_rdu_init(struct zii_pic_mfd *adev);
 

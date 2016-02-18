@@ -31,8 +31,6 @@ struct zii_pic_cmd_desc zii_pic_niu_cmds[ZII_PIC_CMD_COUNT] = {
 	{0x10, 0, zii_pic_niu_process_status_response},
 	/* ZII_PIC_CMD_SW_WDT_SET */
 	{0x1C, 3, NULL},
-	/* ZII_PIC_CMD_SW_WDT_GET */
-	{0x1C, 1, zii_pic_niu_process_watchdog_state},
 	/* ZII_PIC_CMD_PET_WDT */
 	{0x1D, 0, NULL},
 	/* ZII_PIC_CMD_RESET  */
@@ -125,23 +123,6 @@ int zii_pic_niu_process_status_response(struct zii_pic_mfd *adev,
 	pr_debug("\tI/O Expander: %c\n", status->i2c_device_status & 8 ? 'Y' : 'N');
 
 	adev->boot_source = (status->general_status >> 2) & 0x03;
-
-	return 0;
-}
-
-int zii_pic_niu_process_watchdog_state(struct zii_pic_mfd *adev,
-		u8 *data, u8 size)
-{
-	pr_debug("%s: enter\n", __func__);
-
-	/* bad response */
-	if (size != 2)
-		return -EINVAL;
-
-	adev->watchdog_enabled = data[0];
-	adev->watchdog_timeout = data[1];
-
-	pr_debug("Watchdog state: %d, timeout: %d\n", data[0], data[1]);
 
 	return 0;
 }
@@ -352,7 +333,6 @@ int zii_pic_niu_set_boot_source(struct zii_pic_mfd *adev,
 			data, sizeof(data));
 }
 
-
 int zii_pic_niu_hwmon_read_sensor(struct zii_pic_mfd *adev,
 			enum zii_pic_sensor id, int *val)
 {
@@ -400,6 +380,42 @@ int zii_pic_niu_hwmon_read_sensor(struct zii_pic_mfd *adev,
 	return ret;
 }
 
+void zii_pic_niu_watchdog_get_timeout_range(unsigned int *min_timeout,
+	unsigned int *max_timeout, unsigned int *default_timeout)
+{
+	*min_timeout = ZII_PIC_NIU_WDT_MIN_TIMEOUT;
+	*max_timeout = ZII_PIC_NIU_WDT_MAX_TIMEOUT;
+	*default_timeout = ZII_PIC_NIU_WDT_DEFAULT_TIMEOUT;
+}
+
+int zii_pic_niu_watchdog_enable(struct zii_pic_mfd *adev, u16 timeout)
+{
+	union zii_pic_niu_wdt data;
+
+	pr_debug("%s: enter\n", __func__);
+
+	data.get = 0;
+	data.enable = 1;
+	data.timeout = timeout;
+
+	return zii_pic_mcu_cmd(adev, ZII_PIC_CMD_SW_WDT_SET,
+			data.buf, sizeof(data));
+}
+
+int zii_pic_niu_watchdog_disable(struct zii_pic_mfd *adev)
+{
+	union zii_pic_niu_wdt data = {
+		.get = 0,
+		.enable = 0
+	};
+
+	pr_debug("%s: enter\n", __func__);
+
+	return zii_pic_mcu_cmd(adev, ZII_PIC_CMD_SW_WDT_SET,
+			data.buf, sizeof(data));
+}
+
+
 int zii_pic_niu_init(struct zii_pic_mfd *adev)
 {
 	adev->cmd = zii_pic_niu_cmds;
@@ -413,6 +429,8 @@ int zii_pic_niu_init(struct zii_pic_mfd *adev)
 	adev->hw_ops.reset = zii_pic_niu_reset;
 	adev->hw_ops.recovery_reset = NULL;
 	adev->hw_ops.read_sensor = zii_pic_niu_hwmon_read_sensor;
-
+	adev->hw_ops.get_watchdog_timeout_range = zii_pic_niu_watchdog_get_timeout_range;
+	adev->hw_ops.enable_watchdog = zii_pic_niu_watchdog_enable;
+	adev->hw_ops.disable_watchdog = zii_pic_niu_watchdog_disable;
 	return 0;
 }

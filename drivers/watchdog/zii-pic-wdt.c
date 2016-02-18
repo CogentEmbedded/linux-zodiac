@@ -18,7 +18,7 @@
  * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
-/* #define DEBUG */
+#define DEBUG
 
 #include <linux/module.h>
 #include <linux/types.h>
@@ -43,7 +43,8 @@ static int zii_pic_wdt_start(struct watchdog_device *wdt_dev)
 						wdt);
 	pr_debug("%s: enter\n", __func__);
 
-	return zii_pic_watchdog_enable(adev->pic_dev);
+	return zii_pic_watchdog_enable(adev->pic_dev,
+			(u16)adev->wdt.timeout);
 }
 
 static int zii_pic_wdt_stop(struct watchdog_device *wdt_dev)
@@ -77,7 +78,7 @@ static int zii_pic_wdt_set_timeout(struct watchdog_device *wdt_dev,
 
 	pr_debug("%s: enter\n", __func__);
 
-	ret = zii_pic_watchdog_set_timeout(adev->pic_dev, timeout);
+	ret = zii_pic_watchdog_enable(adev->pic_dev, (u16)timeout);
 	if (!ret)
 		adev->wdt.timeout = timeout;
 
@@ -143,31 +144,24 @@ static int zii_pic_wdt_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	adev->pic_dev = pdev->dev.parent;
-	ret = zii_pic_watchdog_get_status(adev->pic_dev);
-	if (ret)
-		return ret;
-
 	adev->wdt.info = &zii_pic_wdt_info;
 	adev->wdt.ops = &zii_pic_wdt_ops;
-	adev->wdt.min_timeout = ZII_PIC_WDT_MIN_TIMEOUT;
-	adev->wdt.max_timeout = ZII_PIC_WDT_MAX_TIMEOUT;
-	adev->wdt.status = WATCHDOG_NOWAYOUT_INIT_STATUS;
+
+	/* get min, max and default timeout */
+	zii_pic_watchdog_get_timeout_range(adev->pic_dev, &adev->wdt.min_timeout,
+			&adev->wdt.max_timeout, &adev->wdt.timeout);
 
 	cell = devm_nvmem_cell_get(&pdev->dev, "wdt_timeout");
-	if (IS_ERR(cell)) {
-		pr_warn("%s: unable to get WDT Timeout from EEPROM, err: %ld\n", __func__, PTR_ERR(cell));
-		adev->wdt.timeout = ZII_PIC_WDT_DEFAULT_TIMEOUT;
-	} else {
+	if (!IS_ERR(cell)) {
 		void *value;
 		size_t cell_len;
 
 		value = nvmem_cell_read(cell, &cell_len);
-		if (!IS_ERR(value)) {
+		if (!IS_ERR(value) &&
+		    *(u16*)value >= adev->wdt.min_timeout &&
+		    *(u16*)value <= adev->wdt.max_timeout)
 			adev->wdt.timeout = *(u16*)value;
 
-			pr_debug("Using WDT timeout from EEPROM: %d\n",
-				adev->wdt.timeout);
-		}
 		devm_nvmem_cell_put(&pdev->dev, cell);
 	}
 
@@ -183,6 +177,8 @@ static int zii_pic_wdt_probe(struct platform_device *pdev)
 	ret = register_restart_handler(&adev->restart_handler);
 	if (ret)
 		pr_err("Failed to register restart handler (err = %d)\n", ret);
+
+	ret = zii_pic_watchdog_enable(adev->pic_dev, (u16)adev->wdt.timeout);
 
 	return ret;
 }

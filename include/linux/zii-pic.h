@@ -17,7 +17,6 @@ enum zii_pic_cmd_id {
 
 	/* Watchdog and reset */
 	ZII_PIC_CMD_SW_WDT_SET,
-	ZII_PIC_CMD_SW_WDT_GET,
 	ZII_PIC_CMD_PET_WDT,
 	ZII_PIC_CMD_RESET,
 	ZII_PIC_CMD_HW_RECOVERY_RESET,
@@ -79,18 +78,13 @@ enum zii_pic_bl_cmd_id {
 
 /* Watchdog access API */
 
-#define ZII_PIC_WDT_DEFAULT_TIMEOUT	180
-#define ZII_PIC_WDT_MIN_TIMEOUT 	60
-/* BUG: inside PIC firmware, it has MAX 300, it does not fit into u8 */
-#define ZII_PIC_WDT_MAX_TIMEOUT		255
-
-int zii_pic_watchdog_enable(struct device *pic_dev);
+int zii_pic_watchdog_enable(struct device *pic_dev, u16 timeout);
 int zii_pic_watchdog_disable(struct device *pic_dev);
-int zii_pic_watchdog_get_status(struct device *pic_dev);
 int zii_pic_watchdog_ping(struct device *pic_dev);
-int zii_pic_watchdog_set_timeout(struct device *pic_dev,
-				unsigned int timeout);
 void zii_pic_watchdog_reset(struct device *pic_dev, bool hw_recovery);
+void zii_pic_watchdog_get_timeout_range(struct device *pic_dev,
+	unsigned int *min_timeout, unsigned int *max_timeout,
+	unsigned int *default_timeout);
 
 /* HWMON API */
 enum zii_pic_sensor {

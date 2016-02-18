@@ -23,6 +23,19 @@
 
 #include "zii-pic-core.h"
 
+#define ZII_PIC_NIU_WDT_DEFAULT_TIMEOUT		180
+#define ZII_PIC_NIU_WDT_MIN_TIMEOUT		1
+#define ZII_PIC_NIU_WDT_MAX_TIMEOUT		255
+
+union zii_pic_niu_wdt {
+	struct {
+		u8	get;
+		u8	enable;
+		u8	timeout;
+	} __packed;
+	u8	buf[3];
+};
+
 struct zii_pic_niu_status_info {
 	u8	bl_part_num_hw;
 	u16	bl_part_num_major_ver;
@@ -45,8 +58,6 @@ struct zii_pic_niu_status_info {
 }__packed;
 
 int zii_pic_niu_process_status_response(struct zii_pic_mfd *adev,
-				u8 *data, u8 size);
-int zii_pic_niu_process_watchdog_state(struct zii_pic_mfd *adev,
 				u8 *data, u8 size);
 int zii_pic_niu_process_reset_reason(struct zii_pic_mfd *adev,
 				u8 *data, u8 size);
@@ -79,6 +90,11 @@ int zii_pic_niu_set_boot_source(struct zii_pic_mfd *adev,
 					enum zii_pic_boot_source boot_src);
 int zii_pic_niu_hwmon_read_sensor(struct zii_pic_mfd *adev,
 			enum zii_pic_sensor id, int *val);
+void zii_pic_niu_watchdog_get_timeout_range(unsigned int *min_timeout,
+	unsigned int *max_timeout, unsigned int *default_timeout);
+int zii_pic_niu_watchdog_enable(struct zii_pic_mfd *adev, u16 timeout);
+int zii_pic_niu_watchdog_disable(struct zii_pic_mfd *adev);
+
 int zii_pic_niu_init(struct zii_pic_mfd *adev);
 
 extern struct zii_pic_cmd_desc zii_pic_niu_cmds[ZII_PIC_CMD_COUNT];

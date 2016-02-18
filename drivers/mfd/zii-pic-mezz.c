@@ -32,8 +32,6 @@ struct zii_pic_cmd_desc zii_pic_mezz_cmds[ZII_PIC_CMD_COUNT] = {
 	{0x10, 0, zii_pic_niu_process_status_response},
 	/* ZII_PIC_CMD_SW_WDT_SET */
 	{0x1C, 3, NULL},
-	/* ZII_PIC_CMD_SW_WDT_GET */
-	{0x1C, 1, zii_pic_niu_process_watchdog_state},
 	/* ZII_PIC_CMD_PET_WDT */
 	{0x1D, 0, NULL},
 	/* ZII_PIC_CMD_RESET  */
@@ -95,6 +93,9 @@ int zii_pic_mezz_init(struct zii_pic_mfd *adev)
 	adev->hw_ops.reset = zii_pic_niu_reset;
 	adev->hw_ops.recovery_reset = NULL;
 	adev->hw_ops.read_sensor = zii_pic_niu_hwmon_read_sensor;
+	adev->hw_ops.get_watchdog_timeout_range = zii_pic_niu_watchdog_get_timeout_range;
+	adev->hw_ops.enable_watchdog = zii_pic_niu_watchdog_enable;
+	adev->hw_ops.disable_watchdog = zii_pic_niu_watchdog_disable;
 
 	return 0;
 }

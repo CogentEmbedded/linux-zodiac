@@ -34,8 +34,6 @@ struct zii_pic_cmd_desc zii_pic_rdu2_cmds[ZII_PIC_CMD_COUNT] = {
 	{0,    0, NULL},
 	/* ZII_PIC_CMD_SW_WDT_SET */
 	{0xA1, 3, NULL},
-	/* ZII_PIC_CMD_SW_WDT_GET */
-	{0,    0, NULL},
 	/* ZII_PIC_CMD_PET_WDT    */
 	{0xA2, 0, NULL},
 	/* ZII_PIC_CMD_RESET  */
@@ -202,6 +200,9 @@ int zii_pic_rdu2_init(struct zii_pic_mfd *adev)
 	/* recovery reset command is the same as on RDU */
 	adev->hw_ops.recovery_reset = zii_pic_rdu_recovery_reset;
 	adev->hw_ops.read_sensor = zii_pic_rdu2_hwmon_read_sensor;
+	adev->hw_ops.get_watchdog_timeout_range = zii_pic_rdu_watchdog_get_timeout_range;
+	adev->hw_ops.enable_watchdog = zii_pic_rdu_watchdog_enable;
+	adev->hw_ops.disable_watchdog = zii_pic_rdu_watchdog_disable;
 
 	return 0;
 }

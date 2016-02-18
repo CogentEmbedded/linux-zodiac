@@ -19,7 +19,7 @@
  * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
-/* #define DEBUG */
+#define DEBUG
 
 #include <linux/delay.h>
 #include <linux/kernel.h>
@@ -37,8 +37,6 @@ struct zii_pic_cmd_desc zii_pic_rdu_cmds[ZII_PIC_CMD_COUNT] = {
 	{0xA0, 0, zii_pic_rdu_process_status_response},
 	/* ZII_PIC_CMD_SW_WDT_SET */
 	{0xA1, 3, NULL},
-	/* ZII_PIC_CMD_SW_WDT_GET */
-	{0,    0, NULL},
 	/* ZII_PIC_CMD_PET_WDT    */
 	{0xA2, 0, NULL},
 	/* ZII_PIC_CMD_RESET  */
@@ -304,6 +302,37 @@ int zii_pic_rdu_recovery_reset(struct zii_pic_mfd *adev)
 					   data, sizeof(data));
 }
 
+void zii_pic_rdu_watchdog_get_timeout_range(unsigned int *min_timeout,
+	unsigned int *max_timeout, unsigned int *default_timeout)
+{
+	*min_timeout = ZII_PIC_RDU_WDT_MIN_TIMEOUT;
+	*max_timeout = ZII_PIC_RDU_WDT_MAX_TIMEOUT;
+	*default_timeout = ZII_PIC_RDU_WDT_DEFAULT_TIMEOUT;
+}
+
+int zii_pic_rdu_watchdog_enable(struct zii_pic_mfd *adev, u16 timeout)
+{
+	union zii_pic_rdu_wdt data;
+
+	pr_debug("%s: enter\n", __func__);
+
+	data.enable = 1;
+	data.timeout = timeout;
+
+	return zii_pic_mcu_cmd(adev, ZII_PIC_CMD_SW_WDT_SET,
+			data.buf, sizeof(data));
+}
+
+int zii_pic_rdu_watchdog_disable(struct zii_pic_mfd *adev)
+{
+	union zii_pic_rdu_wdt data = { .enable = 0 };
+
+	pr_debug("%s: enter\n", __func__);
+
+	return zii_pic_mcu_cmd(adev, ZII_PIC_CMD_SW_WDT_SET,
+			data.buf, sizeof(data));
+}
+
 int zii_pic_rdu_init(struct zii_pic_mfd *adev)
 {
 	adev->cmd = zii_pic_rdu_cmds;
@@ -321,6 +350,8 @@ int zii_pic_rdu_init(struct zii_pic_mfd *adev)
 	adev->hw_ops.reset = zii_pic_niu_reset;
 	adev->hw_ops.recovery_reset = zii_pic_rdu_recovery_reset;
 	adev->hw_ops.read_sensor = zii_pic_rdu_hwmon_read_sensor;
-
+	adev->hw_ops.get_watchdog_timeout_range = zii_pic_rdu_watchdog_get_timeout_range;
+	adev->hw_ops.enable_watchdog = zii_pic_rdu_watchdog_enable;
+	adev->hw_ops.disable_watchdog = zii_pic_rdu_watchdog_disable;
 	return 0;
 }
