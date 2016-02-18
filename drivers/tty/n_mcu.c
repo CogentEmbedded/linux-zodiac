@@ -1,7 +1,7 @@
 /*
  *  n_mcu.c - microcontroller unit communication line discipline
  *
- * Copyright (C) 2015 Andrey Vostrikov <andrey.vostrikov@cogentembedded.com>
+ * Copyright (C) 2015-2016 Andrey Vostrikov <andrey.vostrikov@cogentembedded.com>
   *
   * This program is free software; you can redistribute it and/or
   * modify it under the terms of the GNU General Public License as
@@ -64,12 +64,12 @@
 #define ETX_SIZE		1
 #define MAX_SERIAL_BUF_SIZE	(STX_SIZE + 2 * N_MCU_MAX_CMD_SIZE + ETX_SIZE)
 
-#define MAX_RETRIES		3
-
 enum parser_state {
 	EXPECT_SOF,
 	EXPECT_DATA,
-	EXPECT_ESCAPED_DATA
+	EXPECT_ESCAPED_DATA,
+	DISCARD_DATA,
+	DISCARD_ESCAPED_DATA
 };
 
 struct n_mcu_priv {
@@ -87,9 +87,10 @@ struct n_mcu_priv {
 	size_t			rx_data_size;
 	atomic_t		rx_ready;
 
-	enum parser_state	parser_state;
+	volatile enum parser_state parser_state;
 
 	struct completion	cmd_complete;
+	struct completion	parsing_complete;
 
 	void 			*callback_cookie;
 	event_callback_t	event;
@@ -226,8 +227,7 @@ static void n_mcu_put_data(const u8 const *in,
 	}
 }
 
-static int n_mcu_prepare_frame(struct n_mcu_priv *priv,
-		const u8 *data, size_t size)
+static int n_mcu_prepare_frame(const u8 *data, size_t size)
 {
 	size_t i = 0;
 
@@ -236,30 +236,31 @@ static int n_mcu_prepare_frame(struct n_mcu_priv *priv,
 	if (size > N_MCU_MAX_CMD_SIZE)
 		return -EINVAL;
 
-	priv->tx_frame[i++] = STX;
+	n_mcu_priv.tx_frame[i++] = STX;
 
-	n_mcu_put_data(data, size, priv->tx_frame, &i);
+	n_mcu_put_data(data, size, n_mcu_priv.tx_frame, &i);
 
-	if (priv->add_checksum)
-		priv->add_checksum(data, size, priv->tx_frame, &i);
+	if (n_mcu_priv.add_checksum)
+		n_mcu_priv.add_checksum(data, size, n_mcu_priv.tx_frame, &i);
 
-	priv->tx_frame[i++] = ETX;
+	n_mcu_priv.tx_frame[i++] = ETX;
 
 #ifdef DEBUG
 	print_hex_dump(KERN_DEBUG, "frame data: ", DUMP_PREFIX_OFFSET,
-			16, 1, priv->tx_frame, i, true);
+			16, 1, n_mcu_priv.tx_frame, i, true);
 #endif
 
-	priv->tx_frame_size = i;
+	n_mcu_priv.tx_frame_size = i;
 	return 0;
 }
 
-static void n_mcu_handle_msg(struct n_mcu_priv *priv)
+static void n_mcu_handle_msg(void)
 {
 	pr_debug("%s: enter\n", __func__);
 
-	if (priv->validate_checksum &&
-	    !priv->validate_checksum(priv->rx_data, priv->rx_data_size)) {
+	if (n_mcu_priv.validate_checksum &&
+	    !n_mcu_priv.validate_checksum(n_mcu_priv.rx_data,
+					  n_mcu_priv.rx_data_size)) {
 		n_mcu_priv.transfer_failed = true;
 		goto out;
 	}
@@ -268,8 +269,8 @@ static void n_mcu_handle_msg(struct n_mcu_priv *priv)
 
 	/* this is cmd response */
 	if (atomic_read(&n_mcu_priv.transfer_in_progress)) {
-		if (!completion_done(&priv->cmd_complete))
-			complete(&priv->cmd_complete);
+		if (!completion_done(&n_mcu_priv.cmd_complete))
+			complete(&n_mcu_priv.cmd_complete);
 		goto out;
 	}
 
@@ -280,75 +281,117 @@ out:
 	atomic_set(&n_mcu_priv.rx_ready, 1);
 }
 
-static void n_mcu_parse_data(struct n_mcu_priv *priv,
-		const u8 const *data, int count)
+static void n_mcu_parse_data(const u8 const *data, int count)
 {
 	int i;
 	for (i = 0; i < count; i++) {
-		switch (priv->parser_state) {
+		switch (n_mcu_priv.parser_state) {
 		case EXPECT_SOF:
+			if (data[i] == DLE) {
+				if (cmpxchg(&n_mcu_priv.parser_state,
+					EXPECT_SOF,
+					DISCARD_ESCAPED_DATA) == DISCARD_DATA)
+					goto flush;
+				break;
+			}
+
 			if (data[i] != STX)
 				break;
 
-			if (wait_event_interruptible(priv->wait,
-				atomic_read(&priv->rx_ready)))
+			if (wait_event_interruptible(n_mcu_priv.wait,
+				atomic_read(&n_mcu_priv.rx_ready)))
 				return;
 
-			priv->rx_data_size = 0;
-			priv->parser_state = EXPECT_DATA;
+			n_mcu_priv.rx_data_size = 0;
+
+			if (cmpxchg(&n_mcu_priv.parser_state,
+				EXPECT_SOF,
+				EXPECT_DATA) == DISCARD_DATA)
+				goto flush;
 			break;
 
 		case EXPECT_DATA:
 			if (data[i] == DLE) {
-				priv->parser_state = EXPECT_ESCAPED_DATA;
+				if (cmpxchg(&n_mcu_priv.parser_state,
+					EXPECT_DATA,
+					EXPECT_ESCAPED_DATA) == DISCARD_DATA)
+					goto flush;
 				break;
 			}
 
 			if (unlikely(data[i] == STX)) {
 				pr_warn("unexpected STX, incomplete frame discarded\n");
-				priv->rx_data_size = 0;
+				n_mcu_priv.rx_data_size = 0;
 				break;
 			}
 
 			if (data[i] != ETX) {
-				priv->rx_data[priv->rx_data_size++] = data[i];
+				BUG_ON(n_mcu_priv.rx_data_size == sizeof(n_mcu_priv.rx_data));
+				n_mcu_priv.rx_data[n_mcu_priv.rx_data_size++] = data[i];
 				break;
 			}
 
 			/* ETX, disable further receiving until handled */
 
-			atomic_set(&priv->rx_ready, 0);
+			atomic_set(&n_mcu_priv.rx_ready, 0);
 
-			priv->parser_state = EXPECT_SOF;
+			if (cmpxchg(&n_mcu_priv.parser_state,
+				EXPECT_DATA,
+				EXPECT_SOF) == DISCARD_DATA)
+				goto flush;
 
-			n_mcu_handle_msg(&n_mcu_priv);
+			n_mcu_handle_msg();
 
 			break;
 
 		case EXPECT_ESCAPED_DATA:
-			priv->rx_data[priv->rx_data_size++] = data[i];
-			priv->parser_state = EXPECT_DATA;
+			BUG_ON(n_mcu_priv.rx_data_size == sizeof(n_mcu_priv.rx_data));
+			n_mcu_priv.rx_data[n_mcu_priv.rx_data_size++] = data[i];
+
+			if (cmpxchg(&n_mcu_priv.parser_state,
+				EXPECT_ESCAPED_DATA,
+				EXPECT_DATA) == DISCARD_DATA)
+				goto flush;
+			break;
+
+		case DISCARD_DATA:
+			goto flush;
+
+		case DISCARD_ESCAPED_DATA:
+			pr_debug("%s: discarding escaped...\n", __func__);
+			if (cmpxchg(&n_mcu_priv.parser_state,
+				DISCARD_ESCAPED_DATA,
+				EXPECT_SOF) == DISCARD_DATA)
+				goto flush;
 			break;
 
 		default:
 			BUG();
 		}
 	}
+	return;
+
+flush:
+	if (data[count - 1] == DLE)
+		n_mcu_priv.parser_state = DISCARD_ESCAPED_DATA;
+	else
+		n_mcu_priv.parser_state = EXPECT_SOF;
 }
 
-int n_mcu_send_frame(struct n_mcu_priv *priv)
+int n_mcu_send_frame(void)
 {
 	u8 *frame;
 	ssize_t to_write;
 
 	pr_debug("%s: enter\n", __func__);
 
-	frame = priv->tx_frame;
-	to_write = priv->tx_frame_size;
+	frame = n_mcu_priv.tx_frame;
+	to_write = n_mcu_priv.tx_frame_size;
 
-	set_bit(TTY_DO_WRITE_WAKEUP, &priv->tty->flags);
+	set_bit(TTY_DO_WRITE_WAKEUP, &n_mcu_priv.tty->flags);
 	while (to_write) {
-		ssize_t ret = priv->tty->ops->write(priv->tty, frame, to_write);
+		ssize_t ret = n_mcu_priv.tty->ops->write(n_mcu_priv.tty,
+							 frame, to_write);
 		if (ret < 0)
 			return ret;
 
@@ -361,44 +404,35 @@ int n_mcu_send_frame(struct n_mcu_priv *priv)
 
 static int n_mcu_execute_cmd(struct n_mcu_cmd* cmd)
 {
-	int retry_count = MAX_RETRIES;
 	int ret;
 
 	pr_debug("%s: enter\n", __func__);
 
-start:
-	if ((ret = wait_event_interruptible_timeout(n_mcu_priv.wait,
-		!atomic_read(&n_mcu_priv.transfer_in_progress),
-		msecs_to_jiffies(cmd->timeout)))) {
-
-		if (!ret) {
-			if (!retry_count)
-				return -ETIMEDOUT;
-
-			retry_count--;
-			goto start;
-		}
-		if (ret < 0)
-			return ret;
-	}
+	ret = wait_event_interruptible_timeout(n_mcu_priv.wait,
+			!atomic_read(&n_mcu_priv.transfer_in_progress),
+			msecs_to_jiffies(cmd->timeout));
+	if (!ret)
+		return -ETIMEDOUT;
 
 	spin_lock(&n_mcu_tx_lock);
 
 	if (atomic_cmpxchg(&n_mcu_priv.transfer_in_progress, 0, 1)) {
 		spin_unlock(&n_mcu_tx_lock);
-		goto start;
+		return -EAGAIN;
 	}
 
-	ret = n_mcu_prepare_frame(&n_mcu_priv, cmd->data, cmd->size);
+	ret = n_mcu_prepare_frame(cmd->data, cmd->size);
 	if (ret)
-		goto out;
+		goto unlock;
 
 	reinit_completion(&n_mcu_priv.cmd_complete);
 	n_mcu_priv.transfer_failed = false;
 
-	ret = n_mcu_send_frame(&n_mcu_priv);
+	n_mcu_priv.parser_state = EXPECT_SOF;
+
+	ret = n_mcu_send_frame();
 	if (ret)
-		goto out;
+		goto unlock;
 
 	spin_unlock(&n_mcu_tx_lock);
 
@@ -411,24 +445,23 @@ start:
 			       n_mcu_priv.rx_data_size);
 			goto out;
 		}
-		/* else it is failed due to checksum validation,
-		 * fallback to retry loop */
+		/* else it is failed due to checksum validation */
+		ret = -EIO;
 	}
 
-	atomic_set(&n_mcu_priv.transfer_in_progress, 0);
-	atomic_set(&n_mcu_priv.rx_ready, 1);
+	/* flush incomplete response */
+	tty_driver_flush_buffer(n_mcu_priv.tty);
+	n_mcu_priv.parser_state = DISCARD_DATA;
+	wait_for_completion(&n_mcu_priv.parsing_complete);
+	ret = -ETIMEDOUT;
+	goto out;
 
-	if (--retry_count)
-		goto start;
-
-	return -ETIMEDOUT;
+unlock:
+	spin_unlock(&n_mcu_tx_lock);
 
 out:
-	if (ret) {
-		atomic_set(&n_mcu_priv.transfer_in_progress, 0);
-		atomic_set(&n_mcu_priv.rx_ready, 1);
-		spin_unlock(&n_mcu_tx_lock);
-	}
+	atomic_set(&n_mcu_priv.transfer_in_progress, 0);
+	atomic_set(&n_mcu_priv.rx_ready, 1);
 
 	return ret;
 }
@@ -448,13 +481,13 @@ static int n_mcu_execute_cmd_no_response(struct n_mcu_cmd* cmd)
 	if (atomic_cmpxchg(&n_mcu_priv.transfer_in_progress, 0, 1))
 		pr_warn("%s: previous transfer not completed\n", __func__);
 
-	ret = n_mcu_prepare_frame(&n_mcu_priv, cmd->data, cmd->size);
+	ret = n_mcu_prepare_frame(cmd->data, cmd->size);
 	if (ret)
 		goto err;
 
 	n_mcu_priv.transfer_failed = false;
 
-	ret = n_mcu_send_frame(&n_mcu_priv);
+	ret = n_mcu_send_frame();
 
 err:
 	atomic_set(&n_mcu_priv.transfer_in_progress, 0);
@@ -512,11 +545,11 @@ start:
 		goto start;
 	}
 
-	ret = n_mcu_prepare_frame(&n_mcu_priv, cmd->data, cmd->size);
+	ret = n_mcu_prepare_frame(cmd->data, cmd->size);
 	if (ret)
 		goto out;
 
-	ret = n_mcu_send_frame(&n_mcu_priv);
+	ret = n_mcu_send_frame();
 	if (ret)
 		goto out;
 
@@ -529,8 +562,7 @@ out:
 	return ret;
 }
 
-static int n_mcu_configure_ops(struct n_mcu_priv *priv,
-		struct n_mcu_ops* ops)
+static int n_mcu_configure_ops(struct n_mcu_ops* ops)
 {
 	pr_debug("%s: enter\n", __func__);
 
@@ -542,8 +574,8 @@ static int n_mcu_configure_ops(struct n_mcu_priv *priv,
 	ops->event_response = n_mcu_event_response;
 
 	/* callbacks from client */
-	priv->event = ops->event;
-	priv->callback_cookie = ops->callback_cookie;
+	n_mcu_priv.event = ops->event;
+	n_mcu_priv.callback_cookie = ops->callback_cookie;
 
 	mutex_unlock(&n_mcu_lock);
 
@@ -576,6 +608,7 @@ static int n_mcu_open(struct tty_struct *tty)
 
 		init_waitqueue_head(&n_mcu_priv.wait);
 		init_completion(&n_mcu_priv.cmd_complete);
+		init_completion(&n_mcu_priv.parsing_complete);
 
 		atomic_set(&n_mcu_priv.rx_ready, 1);
 
@@ -593,8 +626,7 @@ static void n_mcu_close(struct tty_struct *tty)
 
 	pr_debug("%s: enter\n", __func__);
 
-	if (!priv)
-		return;
+	BUG_ON(priv->tty != n_mcu_priv.tty);
 
 	mutex_lock(&n_mcu_lock);
 
@@ -618,14 +650,13 @@ static int n_mcu_ioctl(struct tty_struct *tty, struct file *file,
 
 	pr_debug("%s: enter\n", __func__);
 
-	if (!priv)
-		return -EINVAL;
+	BUG_ON(priv->tty != n_mcu_priv.tty);
 
 	switch (cmd) {
 	case N_MCU_SET_CHECKSUM_TYPE:
 		return n_mcu_set_checksum(arg);
 	case N_MCU_CONFIGURE_OPS:
-		return n_mcu_configure_ops(priv, (struct n_mcu_ops*)arg);
+		return n_mcu_configure_ops((struct n_mcu_ops*)arg);
 	default:
 		return n_tty_ioctl_helper(tty, file, cmd, arg);
 	}
@@ -638,14 +669,18 @@ static void n_mcu_receive(struct tty_struct *tty, const u8 *data,
 
 	pr_debug("%s: enter\n", __func__);
 
-	WARN_ON(priv->tty != n_mcu_priv.tty);
+	BUG_ON(priv->tty != n_mcu_priv.tty);
 
 #ifdef DEBUG
 	print_hex_dump(KERN_DEBUG, "n_mcu_receive: data: ", DUMP_PREFIX_OFFSET,
 			16, 1, data, count, true);
 #endif
 
-	n_mcu_parse_data(priv, data, count);
+	reinit_completion(&n_mcu_priv.parsing_complete);
+
+	n_mcu_parse_data(data, count);
+
+	complete(&n_mcu_priv.parsing_complete);
 }
 
 static struct tty_ldisc_ops n_mcu_ldisc = {

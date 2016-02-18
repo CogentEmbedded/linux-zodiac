@@ -19,7 +19,7 @@
  * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#define DEBUG
+/* #define DEBUG */
 
 #include <linux/delay.h>
 #include <linux/kernel.h>
@@ -31,11 +31,6 @@
 
 #define PIC_RDU_ORIENTATION_MASK	0x7
 #define PIC_RDU_STOWAGE_MASK		0x80
-
-/* Main RDU EEPROM has same command/response structure */
-#define zii_pic_rdu_process_eeprom_read		zii_pic_niu_process_eeprom_read
-#define zii_pic_rdu_process_eeprom_write	zii_pic_niu_process_eeprom_write
-
 
 struct zii_pic_cmd_desc zii_pic_rdu_cmds[ZII_PIC_CMD_COUNT] = {
 	/* ZII_PIC_CMD_GET_STATUS */
@@ -67,9 +62,9 @@ struct zii_pic_cmd_desc zii_pic_rdu_cmds[ZII_PIC_CMD_COUNT] = {
 	/* ZII_PIC_CMD_GET_TEMPERATURE */
 	{0,    0, NULL},
 	/* ZII_PIC_CMD_EEPROM_READ */
-	{0xA4, 3, zii_pic_rdu_process_eeprom_read},
+	{0xA4, 3, zii_pic_niu_process_eeprom_read},
 	/* ZII_PIC_CMD_EEPROM_WRITE */
-	{0xA4, 35, zii_pic_rdu_process_eeprom_write},
+	{0xA4, 35, zii_pic_niu_process_eeprom_write},
 	/* ZII_PIC_CMD_GET_FIRMWARE_VERSION */
 	{0,    0, NULL},
 	/* ZII_PIC_CMD_GET_BOOTLOADER_VERSION */
@@ -192,7 +187,12 @@ void zii_pic_rdu_event_handler(struct zii_pic_mfd *adev,
 		adev->stowed = !(event->data[2] & PIC_RDU_STOWAGE_MASK);
 		break;
 	default:
-		BUG();
+		/* unknown data, ignore */;
+#ifdef DEBUG
+		print_hex_dump(KERN_DEBUG, "unknown event data: ", DUMP_PREFIX_OFFSET,
+				16, 1, event->data, event->size, true);
+#endif
+		return;
 	}
 
 	event->size = 2;
@@ -296,29 +296,6 @@ out:
 
 	return ret;
 }
-
-#if 0
-int zii_pic_rdu_init(struct zii_pic_mfd *adev)
-{
-	u8 data = 0;
-	int ret;
-
-	pr_debug("%s: enter\n", __func__);
-
-	/* FIXME: *.bx RDU FW version does not implement this command */
-	if ((adev->firmware_version.letter_1 == 'b') &&
-		(adev->firmware_version.letter_2 == 'x'))
-		return 0;
-
-	/* HW specific init, need to let PIC know that LCD could be enabled */
-	ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_LCD_BOOT_ENABLE, &data, 1);
-
-	/* After this command PIC is unresponsive for about 300 ms */
-	mdelay(300);
-
-	return ret;
-}
-#endif
 
 int zii_pic_rdu_recovery_reset(struct zii_pic_mfd *adev)
 {

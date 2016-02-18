@@ -18,7 +18,7 @@
  * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#define DEBUG
+/* #define DEBUG */
 /* #define VERBOSE_DEBUG */
 
 #include <linux/delay.h>
@@ -49,6 +49,8 @@ static const char zii_pic_fw[] = "zii_pic.hex";
 
 /* timeout to wait before device become ready to be opened via /dev/tty* */
 #define PROBE_DEFER_TIMEOUT	500
+
+#define MAX_RETRIES		3
 
 struct zii_pic_fw_data {
 	unsigned char address[4];
@@ -164,6 +166,7 @@ int zii_pic_mcu_cmd(struct zii_pic_mfd *adev,
 {
 	struct n_mcu_cmd mcu_cmd;
 	u8 ack_id;
+	int retry_count = MAX_RETRIES;
 	int ret;
 
 	pr_debug("%s: enter\n", __func__);
@@ -176,6 +179,7 @@ int zii_pic_mcu_cmd(struct zii_pic_mfd *adev,
 	if (unlikely(data_size != adev->cmd[id].data_len))
 		return -EINVAL;
 
+retry:
 	mcu_cmd.timeout = ZII_PIC_MCU_DEFAULT_CMD_TIMEOUT;
 	mcu_cmd.size = 2 + adev->cmd[id].data_len;
 	mcu_cmd.data[0] = adev->cmd[id].cmd_id;
@@ -192,8 +196,12 @@ int zii_pic_mcu_cmd(struct zii_pic_mfd *adev,
 #endif
 
 	ret = adev->mcu_ops.cmd(&mcu_cmd);
-	if (ret)
-		return ret;
+	if (ret) {
+		retry_count--;
+		if (!retry_count)
+			return ret;
+		goto retry;
+	}
 
 #ifdef DEBUG
 	print_hex_dump(KERN_DEBUG, "response data: ", DUMP_PREFIX_OFFSET,
@@ -201,8 +209,12 @@ int zii_pic_mcu_cmd(struct zii_pic_mfd *adev,
 #endif
 
 	/* check if it is our response */
-	if (ack_id != mcu_cmd.data[1])
-		return -EAGAIN;
+	if (ack_id != mcu_cmd.data[1]) {
+		retry_count--;
+		if (!retry_count)
+			return -EAGAIN;
+		goto retry;
+	}
 
 	/* now cmd data contains response */
 	if (adev->cmd[id].response_handler)
@@ -252,6 +264,7 @@ static int zii_pic_mcu_bl_cmd(struct zii_pic_mfd *adev,
 {
 	struct n_mcu_cmd mcu_cmd;
 	u8 ack_id;
+	int retry_count = MAX_RETRIES;
 	int ret;
 
 #ifdef VERBOSE_DEBUG
@@ -262,6 +275,7 @@ static int zii_pic_mcu_bl_cmd(struct zii_pic_mfd *adev,
 		return 0;
 	}
 
+retry:
 	mcu_cmd.timeout = timeout;
 	/* cmd id + ack + bl cmd id + data */
 	mcu_cmd.size = 3 + data_size;
@@ -280,16 +294,24 @@ static int zii_pic_mcu_bl_cmd(struct zii_pic_mfd *adev,
 #endif
 
 	ret = adev->mcu_ops.cmd(&mcu_cmd);
-	if (ret)
-		return ret;
+	if (ret) {
+		retry_count--;
+		if (!retry_count)
+			return ret;
+		goto retry;
+	}
 
 #ifdef VERBOSE_DEBUG
 	print_hex_dump(KERN_DEBUG, "response data: ", DUMP_PREFIX_OFFSET,
 			16, 1, mcu_cmd.data, mcu_cmd.size, true);
 #endif
 	/* check if it is our response */
-	if (ack_id != mcu_cmd.data[1])
-		return -EAGAIN;
+	if (ack_id != mcu_cmd.data[1]) {
+		retry_count--;
+		if (!retry_count)
+			return -EAGAIN;
+		goto retry;
+	}
 
 	if (response_size) {
 		*response_size = mcu_cmd.size - 3 - adev->checksum_size;
@@ -594,11 +616,20 @@ static int zii_pic_verify_firmware_chunk(struct zii_pic_mfd *adev,
 static int zii_pic_verify_firmware_eof(struct zii_pic_mfd *adev,
 		const struct firmware *firmware)
 {
+	int ret;
 	/* Everything is fine so far, send complete command to PIC */
 	pr_debug("%s: going to commit changes\n", __func__);
-	return zii_pic_mcu_bl_cmd(adev,
+	ret = zii_pic_mcu_bl_cmd(adev,
 		ZII_PIC_BL_CMD_PROGRAM_COMPLETE, 2000,
 		NULL, 0, NULL, NULL);
+	if (ret)
+		return ret;
+
+	ret = zii_pic_mcu_bl_cmd(adev,
+		ZII_PIC_BL_CMD_LAUNCH_APP, 100,
+		NULL, 0, NULL, NULL);
+
+	return ret;
 }
 
 static int zii_pic_upload_firmware_chunk(struct zii_pic_mfd *adev,
@@ -749,22 +780,24 @@ static ssize_t zii_pic_store_boot_source(struct device *dev,
 		struct device_attribute *attr,  const char *buf, size_t count)
 {
 	struct zii_pic_mfd *adev = dev_get_drvdata(dev);
-	u8 boot_src;
+	u8 boot_source;
 	int ret;
 
-	ret = kstrtou8(buf, 0, &boot_src);
+	ret = kstrtou8(buf, 0, &boot_source);
 	if (ret)
 		return ret;
 
-	if (boot_src > PIC_BOOT_SRC_LAST)
+	if (boot_source > PIC_BOOT_SRC_LAST)
 		return -EINVAL;
 
 	if (!adev->hw_ops.set_boot_source)
 		return -ENOTSUPP;
 
-	ret = adev->hw_ops.set_boot_source(adev, boot_src);
+	ret = adev->hw_ops.set_boot_source(adev, boot_source);
 	if (ret)
 		return ret;
+
+	adev->boot_source = boot_source;
 
 	return count;
 }
