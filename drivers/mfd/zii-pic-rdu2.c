@@ -69,11 +69,11 @@ struct zii_pic_cmd_desc zii_pic_rdu2_cmds[ZII_PIC_CMD_COUNT] = {
 	/* ZII_PIC_CMD_DDS_EEPROM_WRITE */
 	{0xA3, 34, zii_pic_rdu_process_dds_eeprom_write},
 	/* ZII_PIC_CMD_GET_BOOT_SOURCE */
-	{0x23, 2, zii_pic_niu_process_get_boot_source},
+	{0x26, 2, zii_pic_niu_process_get_boot_source},
 	/* ZII_PIC_CMD_SET_BOOT_SOURCE */
-	{0x23, 2, NULL},
+	{0x26, 2, NULL},
 	/* ZII_PIC_CMD_LCD_BOOT_ENABLE */
-	{0xBE, 0, NULL},
+	{0,    0, NULL},
 	/* ZII_PIC_CMD_BACKLIGHT */
 	{0xA6, 3, NULL},
 	/* ZII_PIC_CMD_JMP_TO_BOOTLOADER */
