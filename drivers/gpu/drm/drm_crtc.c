@@ -1044,11 +1044,8 @@ int drm_connector_register(struct drm_connector *connector)
 	if (ret)
 		return ret;
 
+	/* ignore debugfs error for now */
 	ret = drm_debugfs_connector_add(connector);
-	if (ret) {
-		drm_sysfs_connector_remove(connector);
-		return ret;
-	}
 
 	return 0;
 }
