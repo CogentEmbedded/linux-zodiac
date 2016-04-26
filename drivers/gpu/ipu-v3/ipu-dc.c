@@ -179,8 +179,8 @@ int ipu_dc_init_sync(struct ipu_dc *dc, struct ipu_di *di, bool interlaced,
 
 	map = ipu_bus_format_to_map(bus_format);
 	if (map < 0) {
-		dev_dbg(priv->dev, "IPU_DISP: No MAP\n");
-		return map;
+		dev_dbg(priv->dev, "IPU_DISP: No MAP, using default RGB888 1x24\n");
+		map = ipu_bus_format_to_map(MEDIA_BUS_FMT_RGB888_1X24);
 	}
 
 	/*
