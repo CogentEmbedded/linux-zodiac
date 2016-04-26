@@ -31,4 +31,9 @@ config DRM_I2C_NXP_TDA998X
 	help
 	  Support for NXP Semiconductors TDA998X HDMI encoders.
 
+config DRM_I2C_TOSHIBA_TC358767
+	tristate "Toshiba TC358767 eDP encoder"
+	help
+	  Support for Toshiba TDA998X eDP encoders.
+
 endmenu
