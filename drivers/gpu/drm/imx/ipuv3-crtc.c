@@ -275,8 +275,14 @@ static int ipu_crtc_mode_set(struct drm_crtc *crtc,
 	sig_cfg.clk_pol = 0;
 	sig_cfg.bus_format = ipu_crtc->bus_format;
 	sig_cfg.v_to_h_sync = 0;
-	sig_cfg.hsync_pin = ipu_crtc->di_hsync_pin;
-	sig_cfg.vsync_pin = ipu_crtc->di_vsync_pin;
+	if (ipu_crtc->di_hsync_pin)
+		sig_cfg.hsync_pin = ipu_crtc->di_hsync_pin;
+	else
+		sig_cfg.hsync_pin = 2;
+	if (ipu_crtc->di_vsync_pin)
+		sig_cfg.vsync_pin = ipu_crtc->di_vsync_pin;
+	else
+		sig_cfg.vsync_pin = 3;
 
 	drm_display_mode_to_videomode(mode, &sig_cfg.mode);
 
