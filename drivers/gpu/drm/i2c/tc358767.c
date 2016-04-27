@@ -139,7 +139,6 @@ struct tc_data {
 	u8			assr;
 
 	struct edid		*edid;
-	uint8_t			edid_buf[EDID_LENGTH];
 
 	struct gpio_desc 	*sd_gpio;
 	struct gpio_desc 	*reset_gpio;
@@ -513,10 +512,6 @@ static char *training_2_errors[] = {
 static u32 tc_srcctrl(struct tc_data *tc)
 {
 	u32 reg =
-//		(tc->link.preemp << 28)| /* Pre-Emphasis for DisplayPort Port1 */
-//		(tc->link.preemp << 20)| /* Pre-Emphasis for DisplayPort Port0 */
-//		(tc->link.swing << 24) | /* Voltage Swing for DisplayPort Port1 */
-//		(tc->link.swing << 16) | /* Voltage Swing for DisplayPort Port0 */
 		DP0_SRCCTRL_NOTP |	/* no pattern */
 		DP0_SRCCTRL_LANESKEW |	/* skew lane 1 data by two LSCLK cycles with respect to lane 0 data */
 		(0 << 0) |		/* AutoCorrect Mode = 0 */
@@ -690,7 +685,7 @@ static int tc_aux_link_setup(struct tc_data *tc)
 		(0 << 4) |	/* Use LSCLK based source */
 		(1 << 0) |	/* LSCLK divider for SYSCLK = 2 */
 		0);
-	tc_write(DP_PHY_CTRL, //0x03000007);
+	tc_write(DP_PHY_CTRL,
 		(1 << 25)|	/* AUX PHY BGR Enable */
 		(1 << 24)|	/* PHY Power Switch Enable */
 		(1 << 2) |	/* Reserved */
@@ -849,9 +844,7 @@ static int tc_set_video_mode(struct tc_data *tc, struct drm_display_mode *mode)
 	tc_write(DP0_ACTIVEVAL, (mode->vdisplay << 16) | (mode->hdisplay));
 
 	tc_write(DP0_SYNCVAL,
-		//(1 << 31)|			/* Vsync active low */
 		(vsync_len << 16)|		/* Vsync width */
-		//(1 << 15)|			/* Hsync active low */
 		(hsync_len << 0)|		/* Hsync width */
 		0);
 
@@ -891,13 +884,13 @@ static int tc_main_link_setup(struct tc_data *tc)
 	tc_write(0x06A0, 0x00003087);
 	/* from exel file - DP1_SrcCtrl */
 	tc_write(0x07a0, 0x00003083);
-	tc_write(SYS_PLLPARAM, //0x00000101);
+	tc_write(SYS_PLLPARAM,
 		(1 << 8) |	/* RefClk frequency is 19.2 MHz */
 		(0 << 4) |	/* Use LSCLK based source */
 		(1 << 0) |	/* LSCLK divider for SYSCLK = 2 */
 		0);
 	/* ----Setup Main Link-------- */
-	tc_write(DP_PHY_CTRL, //0x03000007);	should be 0x03000017
+	tc_write(DP_PHY_CTRL,
 		(1 << 25)|	/* AUX PHY BGR Enable */
 		(1 << 24)|	/* PHY Power Switch Enable */
 		(1 << 2) |	/* Reserved */
@@ -907,14 +900,14 @@ static int tc_main_link_setup(struct tc_data *tc)
 	mdelay(100);
 
 	/* PLL setup */
-	tc_write(DP0_PLLCTRL, //0x00000005);
+	tc_write(DP0_PLLCTRL,
 		(1 << 2) |	/* Force PLL parameter update register */
 		(0 << 1) |	/* PLL bypass disabled */
 		(1 << 0) |	/* Enable PLL */
 		0);
 	/* wait PLL lock */
 	mdelay(100);
-	tc_write(DP1_PLLCTRL, //0x00000005);	//???
+	tc_write(DP1_PLLCTRL,
 		(1 << 2) |	/* Force PLL parameter update register */
 		(0 << 1) |	/* PLL bypass disabled */
 		(1 << 0) |	/* Enable PLL */
@@ -1225,9 +1218,7 @@ static int tc_get_videomodes(struct tc_data *tc, struct display_timings *timings
 		return -EINVAL;
 
 	return edid_to_display_timings(timings, timings->edid);
-#endif
-//#else
-#if 0
+#else
 	if (tc->edid) {
 		struct fb_videomode *mode;
 
@@ -1275,13 +1266,15 @@ static int tc_get_videomodes(struct tc_data *tc, struct display_timings *timings
 #define DDC_SEGMENT_ADDR	0x30
 #define DDC_ADDR		0x50
 
-static int tc_read_edid(struct tc_data *tc)
+static int tc_get_edid_block(void *data, u8 *buf, unsigned int block,
+				  size_t len)
 {
+	struct tc_data *tc = data;
 	int i = 0;
 	int ret;
-	int block;
+	int chunk;
 	unsigned char start = 0;
-	unsigned char segment = 0;
+	unsigned char segment = block;
 
 	struct i2c_msg msgs[] = {
 		{
@@ -1301,61 +1294,40 @@ static int tc_read_edid(struct tc_data *tc)
 	};
 
 	do {
-		block = MIN(DCC_BLOCK_READ, EDID_LENGTH - i);
+		chunk = MIN(DCC_BLOCK_READ, EDID_LENGTH - i);
 
-		msgs[2].buf = tc->edid_buf + i;
-		msgs[2].len = block;
+		msgs[2].buf = buf + i;
+		msgs[2].len = chunk;
 
 		ret = i2c_transfer(&tc->adapter, msgs, 3);
 		if (ret < 0) {
-			dev_err(tc->dev, "block @%d read error: %d\n", i, ret);
+			dev_err(tc->dev, "block @%d.%d read error: %d\n", block, i, ret);
 			goto err;
 		}
 
-		i += DCC_BLOCK_READ;
+		i += chunk;
 		start = i;
 	} while (i < EDID_LENGTH);
 
-#if 1
+#ifdef DUMP_EDID
 	printk("eDP display EDID:\n");
 	for (i = 0; i < EDID_LENGTH; i++) {
 		if ((i) && ((i % 16) == 0))
 			printk("\n");
-		printk("%02x ", tc->edid_buf[i]);
+		printk("%02x ", buf[i]);
 	}
 	printk("\n");
 #endif
 
 	return 0;
 err:
-	dev_err(tc->dev, "tc_read_edid failed: %d\n", ret);
+	dev_err(tc->dev, "get edid failed: %d\n", ret);
 	return ret;
-}
-
-static int tc_get_edid_block(void *data, u8 *buf, unsigned int block,
-				  size_t len)
-{
-	struct tc_data *tc = data;
-
-	memcpy(buf, tc->edid_buf, len);
-#if 0
-	if (block % 2 == 0)
-		memcpy(buf, tc->edid_buf, len);
-	else
-		memcpy(buf, tc->edid_buf + EDID_LENGTH, len);
-#endif
-
-	return 0;
 }
 
 static enum drm_connector_status
 tc_connector_detect(struct drm_connector *connector, bool force)
 {
-	struct tc_data *tc = connector_to_tc(connector);
-	//u8 val = cec_read(priv, REG_CEC_RXSHPDLEV);
-
-	//return (val & CEC_RXSHPDLEV_HPD) ? connector_status_connected :
-	//		connector_status_disconnected;
 	return connector_status_connected;
 }
 
@@ -1365,7 +1337,6 @@ static void tc_encoder_dpms(struct drm_encoder *encoder, int mode)
 	struct tc_data *tc = encoder_to_tc(encoder);
 
 	if (mode == DRM_MODE_DPMS_ON) {
-		printk("!!! tc_encoder_dpms(DRM_MODE_DPMS_ON)\n");
 		ret = tc_main_link_setup(tc);
 		if (ret < 0) {
 			dev_err(tc->dev, "main link setup error: %d\n", ret);
@@ -1377,7 +1348,6 @@ static void tc_encoder_dpms(struct drm_encoder *encoder, int mode)
 			return;
 		}
 	} else {
-		printk("!!! tc_encoder_dpms(!DRM_MODE_DPMS_ON)\n");
 		ret = tc_main_link_stream(tc, 0);
 		if (ret < 0)
 			dev_err(tc->dev, "main link stream stop error: %d\n", ret);
@@ -1386,26 +1356,20 @@ static void tc_encoder_dpms(struct drm_encoder *encoder, int mode)
 
 static void tc_encoder_save(struct drm_encoder *encoder)
 {
-	printk("!!!%s\n", __func__);
 }
 
 static void tc_encoder_restore(struct drm_encoder *encoder)
 {
-	printk("!!!%s\n", __func__);
 }
 
 static bool tc_encoder_mode_fixup(struct drm_encoder *encoder,
 				   const struct drm_display_mode *mode,
 				   struct drm_display_mode *adjusted_mode)
 {
-	struct tc_data *tc = encoder_to_tc(encoder);
-
-	printk("!!! tc_mode_fixup\n");
 	/*
 	 * fixup syncs polarity
 	 * hsync, vsync active low
 	 */
-
 	adjusted_mode->flags = mode->flags;
 	adjusted_mode->flags |= (DRM_MODE_FLAG_NHSYNC |
 					DRM_MODE_FLAG_NVSYNC);
@@ -1417,10 +1381,7 @@ static bool tc_encoder_mode_fixup(struct drm_encoder *encoder,
 static int tc_connector_mode_valid(struct drm_connector *connector,
 					struct drm_display_mode *mode)
 {
-	struct tc_data *tc = connector_to_tc(connector);
-
-	printk("!!! tc_encoder_mode_valid\n");
-
+	/* accept any mode */
 	return MODE_OK;
 }
 
@@ -1431,22 +1392,7 @@ static void tc_encoder_mode_set(struct drm_encoder *encoder,
 {
 	struct tc_data *tc = encoder_to_tc(encoder);
 
-	printk("!!! tc_encoder_mode_set\n");
 	tc->mode = mode;
-	if (mode->flags & (DRM_MODE_FLAG_PHSYNC |
-					DRM_MODE_FLAG_PVSYNC))
-		printk(" !!!Invalid polarityes!!!!\n");
-}
-
-static enum drm_connector_status
-tc_encoder_detect(struct drm_encoder *encoder,
-		       struct drm_connector *connector)
-{
-	struct tc_data *tc = encoder_to_tc(encoder);
-
-	printk("!!! tc_encoder_detect\n");
-	//return connector_status_disconnected;
-	return connector_status_connected;
 }
 
 static int tc_connector_get_modes(struct drm_connector *connector)
@@ -1455,7 +1401,6 @@ static int tc_connector_get_modes(struct drm_connector *connector)
 	struct edid *edid;
 	unsigned int count;
 
-	printk("!!! %s\n", __func__);
 	edid = drm_do_get_edid(connector, tc_get_edid_block, tc);
 
 	kfree(tc->edid);
@@ -1466,31 +1411,32 @@ static int tc_connector_get_modes(struct drm_connector *connector)
 	drm_mode_connector_update_edid_property(connector, edid);
 	count = drm_add_edid_modes(connector, edid);
 
-	//adv7511_set_config_csc(adv7511, connector, adv7511->rgb);
-
 	return count;
 }
 
-static void tc_encoder_set_polling(struct tc_data *tc,
+static void tc_connector_set_polling(struct tc_data *tc,
 					struct drm_connector *connector)
 {
-	//if (tc->irq)
-	if (0)
-		connector->polled = DRM_CONNECTOR_POLL_HPD;
-	else
-		connector->polled = DRM_CONNECTOR_POLL_CONNECT |
-			DRM_CONNECTOR_POLL_DISCONNECT;
+	/* DOTO: add support for HPD */
+	connector->polled = DRM_CONNECTOR_POLL_CONNECT |
+		DRM_CONNECTOR_POLL_DISCONNECT;
+}
+
+static void tc_destroy(struct tc_data *tc)
+{
+	tc_pxl_pll_dis(tc);
+
+	i2c_unregister_device(tc->i2c_edid);
+	i2c_del_adapter(&tc->adapter);
 }
 
 static void tc_encoder_prepare(struct drm_encoder *encoder)
 {
-	printk("!!! %s\n", __func__);
 	tc_encoder_dpms(encoder, DRM_MODE_DPMS_OFF);
 }
 
 static void tc_encoder_commit(struct drm_encoder *encoder)
 {
-	printk("!!! %s\n", __func__);
 	tc_encoder_dpms(encoder, DRM_MODE_DPMS_ON);
 }
 
@@ -1502,19 +1448,7 @@ static const struct drm_encoder_helper_funcs tc_encoder_helper_funcs = {
 	.prepare = tc_encoder_prepare,
 	.commit = tc_encoder_commit,
 	.mode_set = tc_encoder_mode_set,
-	//.get_modes = tc_get_modes,
 };
-
-/*
-static struct drm_encoder_slave_funcs tc_encoder_funcs = {
-	.dpms = tc_encoder_dpms,
-	.mode_fixup = tc_mode_fixup,
-	.mode_valid = tc_encoder_mode_valid,
-	.mode_set = tc_encoder_mode_set,
-	.detect = tc_encoder_detect,
-	.get_modes = tc_get_modes,
-};
-*/
 
 static struct drm_encoder *
 tc_connector_best_encoder(struct drm_connector *connector)
@@ -1534,8 +1468,7 @@ static void tc_encoder_destroy(struct drm_encoder *encoder)
 {
 	struct tc_data *tc = encoder_to_tc(encoder);
 
-	printk("!!! %s\n", __func__);
-	//tda998x_destroy(tc);
+	tc_destroy(tc);
 	drm_encoder_cleanup(encoder);
 }
 
@@ -1638,53 +1571,47 @@ static int tc_bind(struct device *dev, struct device *master, void *data)
 	}
 
 	tc->i2c_edid = i2c_new_dummy(adap, DDC_ADDR);
-
+#if 0
 	/* pre-read edid */
 	ret = tc_read_edid(tc);
 	/* ignore it for now */
 	if (ret)
 		dev_err(tc->dev, "EDID read error\n");
-
+#endif
 	/* Connect */
 	if (dev->of_node)
 		crtcs = drm_of_find_possible_crtcs(drm, dev->of_node);
 
-	printk("CRTCs = 0x%08x\n", crtcs);
 	/* If no CRTCs were found, fall back to our old behaviour */
 	if (crtcs == 0) {
 		dev_warn(dev, "Falling back to first CRTC\n");
 		crtcs = 1 << 0;
 	}
 
-	tc->connector.interlace_allowed = 1;
+	tc->connector.interlace_allowed = 0;
 	tc->encoder.possible_crtcs = crtcs;
 
-	//if (!dev->of_node && params)
-	//	tda998x_encoder_set_config(priv, params);
+	tc_connector_set_polling(tc, &tc->connector);
 
-	tc_encoder_set_polling(tc, &tc->connector);
-
+	/* encoder */
 	drm_encoder_helper_add(&tc->encoder, &tc_encoder_helper_funcs);
 	ret = drm_encoder_init(drm, &tc->encoder, &tc_encoder_funcs,
 			       DRM_MODE_ENCODER_TMDS);
 	if (ret)
 		goto err_encoder;
 
+	/* connector */
 	drm_connector_helper_add(&tc->connector,
 				 &tc_connector_helper_funcs);
 	ret = drm_connector_init(drm, &tc->connector,
 				 &tc_connector_funcs,
 				 DRM_MODE_CONNECTOR_eDP);
-	if (ret) {
-		printk("drm_connector_init: %d\n", ret);
+	if (ret)
 		goto err_connector;
-	}
 
 	ret = drm_connector_register(&tc->connector);
-	if (ret) {
-		printk("drm_connector_register: %d\n", ret);
+	if (ret)
 		goto err_sysfs;
-	}
 
 	tc->connector.encoder = &tc->encoder;
 	drm_mode_connector_attach_encoder(&tc->connector, &tc->encoder);
@@ -1694,13 +1621,14 @@ static int tc_bind(struct device *dev, struct device *master, void *data)
 	i2c_set_clientdata(client, tc);
 
 	return 0;
+
 err_sysfs:
 	drm_connector_cleanup(&tc->connector);
 err_connector:
 	drm_encoder_cleanup(&tc->encoder);
 err_encoder:
+	tc_destroy(tc);
 err:
-	//tc_destroy(tc);
 	kfree(tc);
 	return ret;
 }
@@ -1710,12 +1638,9 @@ static void tc_unbind(struct device *dev, struct device *master,
 {
 	struct tc_data *tc = dev_get_drvdata(dev);
 
-	i2c_unregister_device(tc->i2c_edid);
-	i2c_del_adapter(&tc->adapter);
-
 	drm_connector_cleanup(&tc->connector);
 	drm_encoder_cleanup(&tc->encoder);
-	//tc_destroy(tc);
+	tc_destroy(tc);
 }
 
 static const struct component_ops tc_ops = {
@@ -1734,25 +1659,6 @@ static int tc_remove(struct i2c_client *client)
 	component_del(&client->dev, &tc_ops);
 	return 0;
 }
-
-
-#if 0
-static int tc_encoder_init(struct i2c_client *i2c, struct drm_device *dev,
-				struct drm_encoder_slave *encoder)
-{
-
-	struct tc_data *tc = i2c_get_clientdata(i2c);
-
-	printk("!!! tc_encoder_init()\n");
-
-	encoder->slave_priv = tc;
-	encoder->slave_funcs = &tc_encoder_funcs;
-
-	tc->encoder = &encoder->base;
-
-	return 0;
-}
-#endif
 
 #ifdef CONFIG_OF
 static const struct i2c_device_id tc_i2c_ids[] = {
@@ -1780,34 +1686,6 @@ static struct i2c_driver tc358767_driver = {
 
 module_i2c_driver(tc358767_driver);
 
-#if 0
-static struct drm_i2c_encoder_driver tc_encoder_driver = {
-	.i2c_driver = {
-		.driver = {
-			.name = "tc358767",
-			.of_match_table = tc_of_ids,
-		},
-		.id_table	= tc_i2c_ids,
-		.probe		= tc_probe,
-		.remove 	= tc_remove,
-	},
-
-	.encoder_init = tc_encoder_init,
-};
-
-static int tc_init(void)
-{
-	return drm_i2c_encoder_register(THIS_MODULE, &tc_encoder_driver);
-}
-device_initcall(tc_init);
-
-static void __exit tc_exit(void)
-{
-	drm_i2c_encoder_unregister(&tc_encoder_driver);
-}
-module_exit(tc_exit);
-#endif
-
 MODULE_AUTHOR("Andrey Gusakov <andrey.gusakov@cogentembedded.com>");
-MODULE_DESCRIPTION("tc358767 eDP transmitter driver");
+MODULE_DESCRIPTION("tc358767 eDP encoder driver");
 MODULE_LICENSE("GPL");
