@@ -463,8 +463,8 @@ static void ipu_di_config_clock(struct ipu_di *di,
 		dev_dbg(di->ipu->dev, "  IPU clock can give %lu with divider %u, error %d.%u%%\n",
 			rate, div, (signed)(error - 1000) / 10, error % 10);
 
-		/* Allow a 1% error */
-		if (error < 1010 && error >= 990) {
+		/* Always use ipu clock, not external */
+		if (1) {
 			clk = di->clk_ipu;
 
 			clkgen0 = div << 4;
