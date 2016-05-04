@@ -1622,6 +1622,7 @@ information.</para>
     &sub-y16-be;
     &sub-y8i;
     &sub-y12i;
+    &sub-ys16;
     &sub-uv8;
     &sub-yuyv;
     &sub-uyvy;
