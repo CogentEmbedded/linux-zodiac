@@ -613,7 +613,7 @@ int gpiod_export(struct gpio_desc *desc, bool direction_may_change)
 	else
 		data->direction_can_change = false;
 
-	dev = device_create_with_groups(&gpio_class, chip->dev,
+	dev = device_create_with_groups(&gpio_class, chip->parent,
 					MKDEV(0, 0), data, gpio_groups,
 					desc->name ? desc->name : "gpio%u",
 					desc_to_gpio(desc));
@@ -764,7 +764,7 @@ int gpiochip_sysfs_register(struct gpio_device *gdev)
 	mutex_unlock(&sysfs_lock);
 
 	for (i = 0; i < chip->ngpio; i++) {
-		desc = &chip->desc[i];
+		desc = gpiochip_get_desc(chip, i);
 		if (test_and_clear_bit(FLAG_HOG_EXPORT, &desc->flags)) {
 			ret = gpiod_export(desc, false);
 			if (ret)
