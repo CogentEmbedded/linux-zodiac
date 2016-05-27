@@ -1210,6 +1210,63 @@ err:
 	return ret;
 }
 
+#if 0
+static int tc_get_videomodes(struct tc_data *tc, struct display_timings *timings)
+{
+	int ret = 0;
+#if 0
+	/*
+	 * does not work due to limitation of eDP i2c
+	 */
+	timings->edid = edid_read_i2c(&tc->adapter);
+	if (!timings->edid)
+		return -EINVAL;
+
+	return edid_to_display_timings(timings, timings->edid);
+#else
+	if (tc->edid) {
+		struct fb_videomode *mode;
+
+		ret = edid_to_display_timings(timings, tc->edid);
+
+		mode = timings->modes;
+		/* hsync, vsync active low */
+		mode->sync &= ~(FB_SYNC_HOR_HIGH_ACT |
+				FB_SYNC_VERT_HIGH_ACT);
+	} else {
+		struct fb_videomode *mode;
+
+		dev_info(tc->dev, "no EDID, assume Innolux N133HSE\n");
+
+		/* one mode */
+		mode = kzalloc(1 * sizeof(struct fb_videomode), GFP_KERNEL);
+		timings->num_modes = 1;
+		timings->modes = mode;
+
+		/* fill */
+		mode->name = "Innolux N133HSE";
+		mode->refresh = 60;
+		mode->xres = 1920;
+		mode->yres = 1080;
+		mode->pixclock = KHZ2PICOS(138500);
+		mode->left_margin = 80;
+		mode->right_margin = 40;
+		mode->upper_margin = 16;
+		mode->lower_margin = 14;
+		mode->hsync_len = 40;
+		mode->vsync_len = 2;
+		mode->sync = 0;
+		mode->vmode = 0;
+		mode->display_flags = 0;
+
+		ret = 0;
+	}
+#endif
+
+	return ret;
+}
+#endif
+
 #define DDC_BLOCK_READ		8
 #define DDC_SEGMENT_ADDR	0x30
 #define DDC_ADDR		0x50
