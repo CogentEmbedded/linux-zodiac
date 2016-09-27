@@ -44,7 +44,7 @@ struct zii_pic_cmd_desc zii_pic_rdu2_cmds[ZII_PIC_CMD_COUNT] = {
 	/* ZII_PIC_CMD_GET_STATUS */
 	{0,    0, NULL},
 	/* ZII_PIC_CMD_SW_WDT_SET */
-	{0xA1, 3, NULL},
+	{0xA1, 2, NULL},
 	/* ZII_PIC_CMD_SW_WDT_GET */
 	{0,    0, NULL},
 	/* ZII_PIC_CMD_PET_WDT    */

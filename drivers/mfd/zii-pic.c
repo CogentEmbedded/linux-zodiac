@@ -76,15 +76,6 @@ typedef int (*zii_pic_firmware_action_t)(struct zii_pic_mfd *adev,
 typedef int (*zii_pic_firmware_eof_t)(struct zii_pic_mfd *adev,
 		const struct firmware *firmware);
 
-union zii_pic_cmd_data_set_wdt {
-	struct {
-		u8	get;
-		u8	enable;
-		u8	timeout;
-	};
-	u8	buf[3];
-} __packed;
-
 
 const static struct of_device_id zii_pic_mfd_dt_ids[] = {
 	{ .compatible = "zii,pic-niu",  .data = (const void *)PIC_HW_ID_NIU},
@@ -992,17 +983,20 @@ static int zii_pic_mfd_remove(struct device *dev)
 int zii_pic_watchdog_enable(struct device *pic_dev)
 {
 	struct zii_pic_mfd *adev = dev_get_drvdata(pic_dev);
-	union zii_pic_cmd_data_set_wdt data;
 	int ret;
 
 	pr_debug("%s: enter\n", __func__);
 
-	data.get = 0;
-	data.enable = 1;
-	data.timeout = adev->watchdog_timeout;
+	if (adev->hw_id == PIC_HW_ID_RDU2) {
+		u8 cmd_data[2] = { 1, adev->watchdog_timeout };
+		ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_SW_WDT_SET,
+				cmd_data, sizeof(cmd_data));
+	} else {
+		u8 cmd_data[3] = { 0, 1, adev->watchdog_timeout };
+		ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_SW_WDT_SET,
+				cmd_data, sizeof(cmd_data));
+	}
 
-	ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_SW_WDT_SET,
-			      data.buf, sizeof(data));
 	if (ret)
 		pr_err("Failed to enable watchdog (err = %d)\n", ret);
 	else
@@ -1014,17 +1008,20 @@ int zii_pic_watchdog_enable(struct device *pic_dev)
 int zii_pic_watchdog_disable(struct device *pic_dev)
 {
 	struct zii_pic_mfd *adev = dev_get_drvdata(pic_dev);
-	union zii_pic_cmd_data_set_wdt data;
 	int ret;
 
 	pr_debug("%s: enter\n", __func__);
 
-	data.get = 0;
-	data.enable = 0;
-	data.timeout = 0;
+	if (adev->hw_id == PIC_HW_ID_RDU2) {
+		u8 cmd_data[2] = { 0, 0 };
+		ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_SW_WDT_SET,
+				cmd_data, sizeof(cmd_data));
+	} else {
+		u8 cmd_data[3] = { 0, 0, 0 };
+		ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_SW_WDT_SET,
+				cmd_data, sizeof(cmd_data));
+	}
 
-	ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_SW_WDT_SET,
-			      data.buf, sizeof(data));
 	if (ret)
 		pr_err("Failed to disable watchdog (err = %d)\n", ret);
 	else
@@ -1041,10 +1038,10 @@ int zii_pic_watchdog_get_status(struct device *pic_dev)
 
 	pr_debug("%s: enter\n", __func__);
 
-	/* Special case for NIU HW as firmware does not respond properly
+	/* Special case for HW where firmware does not respond properly
 	 * Assume watchdog is enabled and has default timeout
 	 */
-	if (adev->hw_id == PIC_HW_ID_NIU) {
+	if (adev->hw_id == PIC_HW_ID_NIU || adev->hw_id == PIC_HW_ID_RDU2) {
 		adev->watchdog_enabled = 1;
 		adev->watchdog_timeout = ZII_PIC_WDT_DEFAULT_TIMEOUT;
 		return 0;
@@ -1077,7 +1074,6 @@ int zii_pic_watchdog_set_timeout(struct device *pic_dev,
 		unsigned int timeout)
 {
 	struct zii_pic_mfd *adev = dev_get_drvdata(pic_dev);
-	union zii_pic_cmd_data_set_wdt data;
 	int ret;
 
 	pr_debug("%s: enter\n", __func__);
@@ -1086,12 +1082,16 @@ int zii_pic_watchdog_set_timeout(struct device *pic_dev,
 	    timeout > ZII_PIC_WDT_MAX_TIMEOUT)
 		return -EINVAL;
 
-	data.get = 0;
-	data.enable = adev->watchdog_enabled;
-	data.timeout = timeout;
+	if (adev->hw_id == PIC_HW_ID_RDU2) {
+		u8 cmd_data[2] = { adev->watchdog_enabled, timeout };
+		ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_SW_WDT_SET,
+				cmd_data, sizeof(cmd_data));
+	} else {
+		u8 cmd_data[3] = { 0, adev->watchdog_enabled, timeout };
+		ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_SW_WDT_SET,
+				cmd_data, sizeof(cmd_data));
+	}
 
-	ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_SW_WDT_SET,
-			data.buf, sizeof(data));
 	if (ret)
 		pr_err("Failed to set watchdog timeout (err = %d)\n", ret);
 	else
