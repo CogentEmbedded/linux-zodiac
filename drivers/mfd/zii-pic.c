@@ -1143,47 +1143,40 @@ int zii_pic_hwmon_read_sensor(struct device *pic_dev,
 static int zii_pic_eeprom_read_page(struct zii_pic_mfd *adev,
 		enum zii_pic_eeprom_type type, u16 page)
 {
-	switch(type) {
-	case MAIN_EEPROM:
-	{
-		u8 cmd_data[3] = {1, page & 0xFF, page >> 8};
-		return zii_pic_mcu_cmd(adev, ZII_PIC_CMD_EEPROM_READ,
-				cmd_data, sizeof(cmd_data));
-	}
-	case DDS_EEPROM:
-	{
-		u8 cmd_data[2] = {1, page & 0xFF};
-		return zii_pic_mcu_cmd(adev, ZII_PIC_CMD_DDS_EEPROM_READ,
-				cmd_data, sizeof(cmd_data));
-	}
-	default:
-		BUG();
-	}
-	return 0;
+	u8 cmd, cmd_data[3];
+	int size = 0;
+
+	BUG_ON(type != MAIN_EEPROM && type != DDS_EEPROM);
+
+	cmd = (type == MAIN_EEPROM ? ZII_PIC_CMD_EEPROM_READ :
+				     ZII_PIC_CMD_DDS_EEPROM_READ);
+	cmd_data[size++] = 1;
+	cmd_data[size++] = page & 0xff;
+	if (type == MAIN_EEPROM || adev->hw_id == PIC_HW_ID_RDU2)
+		cmd_data[size++] = (page >> 8) & 0xff;
+
+	return zii_pic_mcu_cmd(adev, cmd, cmd_data, size);
 }
 
 static int zii_pic_eeprom_write_page(struct zii_pic_mfd *adev,
 		enum zii_pic_eeprom_type type, u16 page, const u8 *data)
 {
-	switch(type) {
-	case MAIN_EEPROM:
-	{
-		u8 cmd_data[35] = {0, page & 0xFF, page >> 8};
-		memcpy(&cmd_data[3], data, ZII_PIC_EEPROM_PAGE_SIZE);
-		return zii_pic_mcu_cmd(adev, ZII_PIC_CMD_EEPROM_WRITE,
-				cmd_data, sizeof(cmd_data));
-	}
-	case DDS_EEPROM:
-	{
-		u8 cmd_data[34] = {0, page & 0xFF};
-		memcpy(&cmd_data[2], data, ZII_PIC_EEPROM_PAGE_SIZE);
-		return zii_pic_mcu_cmd(adev, ZII_PIC_CMD_DDS_EEPROM_WRITE,
-				cmd_data, sizeof(cmd_data));
-	}
-	default:
-		BUG();
-	}
-	return 0;
+	u8 cmd, cmd_data[3 + ZII_PIC_EEPROM_PAGE_SIZE];
+	int size = 0;
+
+	BUG_ON(type != MAIN_EEPROM && type != DDS_EEPROM);
+
+	cmd = (type == MAIN_EEPROM ? ZII_PIC_CMD_EEPROM_WRITE :
+				     ZII_PIC_CMD_DDS_EEPROM_WRITE);
+	cmd_data[size++] = 0;
+	cmd_data[size++] = page & 0xff;
+	if (type == MAIN_EEPROM || adev->hw_id == PIC_HW_ID_RDU2)
+		cmd_data[size++] = (page >> 8) & 0xff;
+
+	memcpy(cmd_data + size, data, ZII_PIC_EEPROM_PAGE_SIZE);
+	size += ZII_PIC_EEPROM_PAGE_SIZE;
+
+	return zii_pic_mcu_cmd(adev, cmd, cmd_data, size);
 }
 
 int zii_pic_eeprom_read(struct device *pic_dev,
