@@ -18,7 +18,7 @@
  * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
 
-#define DEBUG
+/* #define DEBUG */
 /* #define VERBOSE_DEBUG */
 
 #include <linux/delay.h>
