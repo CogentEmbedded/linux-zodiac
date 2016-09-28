@@ -461,7 +461,7 @@ config BACKLIGHT_BD6107
 	  If you have a Rohm BD6107 say Y to enable the backlight driver.
 
 config BACKLIGHT_ZII_PIC
-	bool "ZII PIC LCD Backlight driver"
+	tristate "ZII PIC LCD Backlight driver"
 	depends on MFD_ZII_PIC
 
 	help

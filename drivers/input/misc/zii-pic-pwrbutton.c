@@ -76,9 +76,15 @@ static int zii_pic_pwrbutton_probe(struct platform_device *pdev)
 	return 0;
 }
 
+static int zii_pic_pwrbutton_remove(struct platform_device *pdev)
+{
+	return zii_pic_register_pwrbutton_callback(pdev->dev.parent,
+			NULL, NULL);
+}
 
 static struct platform_driver zii_pic_pwrbutton_driver = {
 	.probe		= zii_pic_pwrbutton_probe,
+	.remove		= zii_pic_pwrbutton_remove,
 	.driver		= {
 		.name	= ZII_PIC_NAME_PWRBUTTON,
 		.of_match_table = zii_pic_pwrbutton_of_match,

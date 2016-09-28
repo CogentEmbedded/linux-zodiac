@@ -1004,6 +1004,7 @@ int zii_pic_watchdog_enable(struct device *pic_dev)
 
 	return ret;
 }
+EXPORT_SYMBOL(zii_pic_watchdog_enable);
 
 int zii_pic_watchdog_disable(struct device *pic_dev)
 {
@@ -1029,6 +1030,7 @@ int zii_pic_watchdog_disable(struct device *pic_dev)
 
 	return ret;
 }
+EXPORT_SYMBOL(zii_pic_watchdog_disable);
 
 int zii_pic_watchdog_get_status(struct device *pic_dev)
 {
@@ -1055,6 +1057,7 @@ int zii_pic_watchdog_get_status(struct device *pic_dev)
 
 	return ret;
 }
+EXPORT_SYMBOL(zii_pic_watchdog_get_status);
 
 int zii_pic_watchdog_ping(struct device *pic_dev)
 {
@@ -1069,6 +1072,7 @@ int zii_pic_watchdog_ping(struct device *pic_dev)
 
 	return ret;
 }
+EXPORT_SYMBOL(zii_pic_watchdog_ping);
 
 int zii_pic_watchdog_set_timeout(struct device *pic_dev,
 		unsigned int timeout)
@@ -1099,6 +1103,7 @@ int zii_pic_watchdog_set_timeout(struct device *pic_dev,
 
 	return ret;
 }
+EXPORT_SYMBOL(zii_pic_watchdog_set_timeout);
 
 void zii_pic_watchdog_reset(struct device *pic_dev, bool hw_recovery)
 {
@@ -1126,6 +1131,7 @@ void zii_pic_watchdog_reset(struct device *pic_dev, bool hw_recovery)
 		pr_emerg("%s: reset cmd timed out, repeat\n", __func__);
 	}
 }
+EXPORT_SYMBOL(zii_pic_watchdog_reset);
 
 int zii_pic_hwmon_read_sensor(struct device *pic_dev,
 			      enum zii_pic_sensor id, int *val)
@@ -1139,6 +1145,7 @@ int zii_pic_hwmon_read_sensor(struct device *pic_dev,
 
 	return adev->hw_ops.read_sensor(adev, id, val);
 }
+EXPORT_SYMBOL(zii_pic_hwmon_read_sensor);
 
 static int zii_pic_eeprom_read_page(struct zii_pic_mfd *adev,
 		enum zii_pic_eeprom_type type, u16 page)
@@ -1210,6 +1217,7 @@ int zii_pic_eeprom_read(struct device *pic_dev,
 
 	return 0;
 }
+EXPORT_SYMBOL(zii_pic_eeprom_read);
 
 int zii_pic_eeprom_write(struct device *pic_dev,
 		enum zii_pic_eeprom_type type, u16 reg,
@@ -1249,6 +1257,7 @@ int zii_pic_eeprom_write(struct device *pic_dev,
 
 	return 0;
 }
+EXPORT_SYMBOL(zii_pic_eeprom_write);
 
 int zii_pic_register_pwrbutton_callback(struct device *pic_dev,
 		zii_pic_pwrbutton_callback_t callback,
@@ -1263,6 +1272,7 @@ int zii_pic_register_pwrbutton_callback(struct device *pic_dev,
 
 	return 0;
 }
+EXPORT_SYMBOL(zii_pic_register_pwrbutton_callback);
 
 int zii_pic_backlight_set(struct device *pic_dev, int intensity)
 {
@@ -1280,6 +1290,8 @@ int zii_pic_backlight_set(struct device *pic_dev, int intensity)
 
 	return zii_pic_mcu_cmd(adev, ZII_PIC_CMD_BACKLIGHT, data, sizeof(data));
 }
+EXPORT_SYMBOL(zii_pic_backlight_set);
+
 
 
 

@@ -190,7 +190,7 @@ config ZIIRAVE_WATCHDOG
 	  module will be called ziirave_wdt.
 
 config ZII_PIC_WATCHDOG
-	bool "ZII PIC Watchdog timer"
+	tristate "ZII PIC Watchdog timer"
 	depends on MFD_ZII_PIC
 	select WATCHDOG_CORE
 	help

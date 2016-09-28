@@ -1824,7 +1824,7 @@ config SENSORS_ULTRA45
 	  sensors.
 
 config SENSORS_ZII_PIC
-	bool "ZII PIC sensors"
+	tristate "ZII PIC sensors"
 	depends on MFD_ZII_PIC
 	help
 	  This driver provides support for the Zodiac Inflight Infotainment PIC
