@@ -94,7 +94,9 @@ struct zii_pic_mfd {
 	enum zii_pic_hw_id		hw_id;
 	u8				checksum_size;
 
-	atomic_t			cmd_seqn;
+	struct mutex			mutex;
+
+	int				cmd_seqn;
 	struct zii_pic_cmd_desc		*cmd;
 	struct zii_pic_hw_ops		hw_ops;
 	struct n_mcu_ops		mcu_ops;

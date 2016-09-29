@@ -117,6 +117,7 @@ static int zii_pic_process_firmware(struct zii_pic_mfd *adev,
 		const struct firmware *firmware,
 		zii_pic_firmware_action_t action,
 		zii_pic_firmware_eof_t eof);
+static int zii_pic_watchdog_disable_locked(struct zii_pic_mfd *adev);
 
 
 static int zii_pic_device_added(struct uart_slave *slave)
@@ -135,6 +136,7 @@ static int zii_pic_device_added(struct uart_slave *slave)
 	return 0;
 }
 
+/* locking needed to protect against race with handler setup */
 static void zii_pic_event_handler(void *cookie, struct n_mcu_cmd *event)
 {
 	struct zii_pic_mfd *adev = cookie;
@@ -146,10 +148,13 @@ static void zii_pic_event_handler(void *cookie, struct n_mcu_cmd *event)
 			16, 1, event->data, event->size, true);
 #endif
 
+	mutex_lock(&adev->mutex);
 	if (adev->hw_ops.event_handler)
 		adev->hw_ops.event_handler(adev, event);
+	mutex_unlock(&adev->mutex);
 }
 
+/* lock must be held */
 int zii_pic_mcu_cmd(struct zii_pic_mfd *adev,
 		enum zii_pic_cmd_id id, const u8 * const data, u8 data_size)
 {
@@ -170,7 +175,7 @@ int zii_pic_mcu_cmd(struct zii_pic_mfd *adev,
 	mcu_cmd.timeout = ZII_PIC_MCU_DEFAULT_CMD_TIMEOUT;
 	mcu_cmd.size = 2 + adev->cmd[id].data_len;
 	mcu_cmd.data[0] = adev->cmd[id].cmd_id;
-	mcu_cmd.data[1] = ack_id = atomic_inc_return(&adev->cmd_seqn);
+	mcu_cmd.data[1] = ack_id = ++adev->cmd_seqn;
 
 	/* cmd specific data */
 	if (data_size) {
@@ -206,6 +211,7 @@ int zii_pic_mcu_cmd(struct zii_pic_mfd *adev,
 	return 0;
 }
 
+/* lock must be held */
 int zii_pic_mcu_cmd_no_response(struct zii_pic_mfd *adev,
 		enum zii_pic_cmd_id id, const u8 * const data, u8 data_size)
 {
@@ -221,7 +227,7 @@ int zii_pic_mcu_cmd_no_response(struct zii_pic_mfd *adev,
 
 	mcu_cmd.size = 2 + adev->cmd[id].data_len;
 	mcu_cmd.data[0] = adev->cmd[id].cmd_id;
-	mcu_cmd.data[1] = atomic_inc_return(&adev->cmd_seqn);
+	mcu_cmd.data[1] = ++adev->cmd_seqn;
 
 	/* cmd specific data */
 	if (data_size) {
@@ -236,6 +242,7 @@ int zii_pic_mcu_cmd_no_response(struct zii_pic_mfd *adev,
 	return adev->mcu_ops.cmd_no_response(&mcu_cmd);
 }
 
+/* lock must be held */
 static int zii_pic_mcu_bl_cmd(struct zii_pic_mfd *adev,
 		enum zii_pic_bl_cmd_id id, u32 timeout,
 		const u8 * const data, u8 data_size,
@@ -257,7 +264,7 @@ static int zii_pic_mcu_bl_cmd(struct zii_pic_mfd *adev,
 	/* cmd id + ack + bl cmd id + data */
 	mcu_cmd.size = 3 + data_size;
 	mcu_cmd.data[0] = adev->cmd[ZII_PIC_CMD_BOOTLOADER].cmd_id;
-	mcu_cmd.data[1] = ack_id = atomic_inc_return(&adev->cmd_seqn);
+	mcu_cmd.data[1] = ack_id = ++adev->cmd_seqn;
 	mcu_cmd.data[2] = id;
 
 	/* cmd specific data */
@@ -296,6 +303,7 @@ static int zii_pic_mcu_bl_cmd(struct zii_pic_mfd *adev,
 	return 0;
 }
 
+/* lock must be held (cmd called) */
 static void zii_pic_get_reset_reason(struct zii_pic_mfd *adev)
 {
 	int ret;
@@ -309,6 +317,7 @@ static void zii_pic_get_reset_reason(struct zii_pic_mfd *adev)
 	}
 }
 
+/* lock must be held (cmd called) */
 static inline int zii_pic_get_versions(struct zii_pic_mfd *adev)
 {
 	if (adev->hw_ops.get_versions)
@@ -316,6 +325,7 @@ static inline int zii_pic_get_versions(struct zii_pic_mfd *adev)
 	return 0;
 }
 
+/* lock must be held (cmd called) */
 static inline int zii_pic_get_status(struct zii_pic_mfd *adev)
 {
 	if (adev->hw_ops.get_status)
@@ -392,15 +402,19 @@ static int zii_pic_configure(struct zii_pic_mfd *adev)
 	if (unlikely(!adev->mcu_ops.cmd || !adev->mcu_ops.cmd_no_response))
 		BUG();
 
+	/* not strictly needed here, but let's keep invariants */
+	mutex_lock(&adev->mutex);
+
 	ret = zii_pic_get_status(adev);
+	if (!ret)
+		ret = zii_pic_get_versions(adev);
+	if (!ret)
+		zii_pic_get_reset_reason(adev);
+
+	mutex_unlock(&adev->mutex);
+
 	if (ret)
 		return ret;
-
-	ret = zii_pic_get_versions(adev);
-	if (ret)
-		return ret;
-
-	zii_pic_get_reset_reason(adev);
 
 	ret = mfd_add_devices(adev->dev, -1, zii_pic_devices,
 			ARRAY_SIZE(zii_pic_devices), NULL, 0, NULL);
@@ -495,7 +509,8 @@ static int zii_pic_uart_open(struct tty_struct *tty, struct file *filp)
 	return 0;
 }
 
-static int zii_pic_query_device(struct zii_pic_mfd *adev)
+/* part of firmware update - lock kept for entire operation */
+static int zii_pic_query_device_locked(struct zii_pic_mfd *adev)
 {
 	struct zii_pic_fw_info *info;
 	u8 *response;
@@ -527,7 +542,8 @@ static int zii_pic_query_device(struct zii_pic_mfd *adev)
 	return ret;
 }
 
-static int zii_pic_erase_device(struct zii_pic_mfd *adev)
+/* part of firmware update - lock kept for entire operation */
+static int zii_pic_erase_device_locked(struct zii_pic_mfd *adev)
 {
 	pr_debug("%s: enter\n", __func__);
 
@@ -537,6 +553,7 @@ static int zii_pic_erase_device(struct zii_pic_mfd *adev)
 			NULL, NULL);
 }
 
+/* part of firmware update - lock kept for entire operation */
 static int zii_pic_verify_firmware_chunk(struct zii_pic_mfd *adev,
 		struct zii_pic_fw_data *data)
 {
@@ -582,6 +599,7 @@ static int zii_pic_verify_firmware_chunk(struct zii_pic_mfd *adev,
 	return ret;
 }
 
+/* part of firmware update - lock kept for entire operation */
 static int zii_pic_verify_firmware_eof(struct zii_pic_mfd *adev,
 		const struct firmware *firmware)
 {
@@ -592,6 +610,7 @@ static int zii_pic_verify_firmware_eof(struct zii_pic_mfd *adev,
 		NULL, 0, NULL, NULL);
 }
 
+/* part of firmware update - lock kept for entire operation */
 static int zii_pic_upload_firmware_chunk(struct zii_pic_mfd *adev,
 		struct zii_pic_fw_data *data)
 {
@@ -606,6 +625,7 @@ static int zii_pic_upload_firmware_chunk(struct zii_pic_mfd *adev,
 		NULL, NULL);
 }
 
+/* part of firmware update - lock kept for entire operation */
 static int zii_pic_upload_firmware_eof(struct zii_pic_mfd *adev,
 		const struct firmware *firmware)
 {
@@ -616,6 +636,7 @@ static int zii_pic_upload_firmware_eof(struct zii_pic_mfd *adev,
 			zii_pic_verify_firmware_eof);
 }
 
+/* part of firmware update - lock kept for entire operation */
 static int zii_pic_process_firmware(struct zii_pic_mfd *adev,
 		const struct firmware *firmware,
 		zii_pic_firmware_action_t action,
@@ -672,6 +693,7 @@ static int zii_pic_process_firmware(struct zii_pic_mfd *adev,
 	return ret;
 }
 
+/* no locking */
 static ssize_t zii_pic_show_fw_version(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
@@ -687,10 +709,10 @@ static ssize_t zii_pic_show_fw_version(struct device *dev,
 			adev->firmware_version.letter_1,
 			adev->firmware_version.letter_2);
 }
-
 static DEVICE_ATTR(part_number_firmware, S_IRUSR | S_IRGRP | S_IROTH,
 		zii_pic_show_fw_version, NULL);
 
+/* no locking */
 static ssize_t zii_pic_show_bl_version(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
@@ -709,6 +731,7 @@ static ssize_t zii_pic_show_bl_version(struct device *dev,
 static DEVICE_ATTR(part_number_bootloader, S_IRUSR | S_IRGRP | S_IROTH,
 		zii_pic_show_bl_version, NULL);
 
+/* no locking */
 static ssize_t zii_pic_show_reset_reason(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
@@ -716,11 +739,10 @@ static ssize_t zii_pic_show_reset_reason(struct device *dev,
 
 	return snprintf(buf, PAGE_SIZE, "%d\n", adev->reset_reason);
 }
-
 static DEVICE_ATTR(reset_reason, S_IRUSR | S_IRGRP,
 		zii_pic_show_reset_reason, NULL);
 
-
+/* take lock if running command, don't protect access to adev->boot_source */
 static ssize_t zii_pic_show_boot_source(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
@@ -728,7 +750,9 @@ static ssize_t zii_pic_show_boot_source(struct device *dev,
 
 	if (adev->hw_ops.get_boot_source) {
 		int ret;
+		mutex_lock(&adev->mutex);
 		ret = adev->hw_ops.get_boot_source(adev);
+		mutex_unlock(&adev->mutex);
 		if (ret)
 			return ret;
 	}
@@ -736,6 +760,7 @@ static ssize_t zii_pic_show_boot_source(struct device *dev,
 	return snprintf(buf, PAGE_SIZE, "%d\n", adev->boot_source);
 }
 
+/* take lock while running commands */
 static ssize_t zii_pic_store_boot_source(struct device *dev,
 		struct device_attribute *attr,  const char *buf, size_t count)
 {
@@ -753,7 +778,9 @@ static ssize_t zii_pic_store_boot_source(struct device *dev,
 	if (!adev->hw_ops.set_boot_source)
 		return -ENOTSUPP;
 
+	mutex_lock(&adev->mutex);
 	ret = adev->hw_ops.set_boot_source(adev, boot_src);
+	mutex_unlock(&adev->mutex);
 	if (ret)
 		return ret;
 
@@ -763,6 +790,7 @@ static ssize_t zii_pic_store_boot_source(struct device *dev,
 static DEVICE_ATTR(boot_source, S_IRUSR | S_IWUSR | S_IRGRP,
 		zii_pic_show_boot_source, zii_pic_store_boot_source);
 
+/* part of firmware update - lock kept for entire operation */
 static void zii_pic_upload_firmware(const struct firmware *firmware,
 		void *context)
 {
@@ -781,15 +809,15 @@ static void zii_pic_upload_firmware(const struct firmware *firmware,
 	/* wait until bootloader is ready to accept commands */
 	msleep(3000);
 
-	ret = zii_pic_watchdog_disable(adev->dev);
+	ret = zii_pic_watchdog_disable_locked(adev);
 	if (ret)
 		goto out;
 
-	ret = zii_pic_query_device(adev);
+	ret = zii_pic_query_device_locked(adev);
 	if (ret)
 		goto out;
 
-	ret = zii_pic_erase_device(adev);
+	ret = zii_pic_erase_device_locked(adev);
 	if (ret)
 		goto out;
 
@@ -808,21 +836,18 @@ out:
 	if (ret)
 		adev->fw_update_progress = ret;
 
+	/* locked since update started */
+	mutex_unlock(&adev->mutex);
 }
 
+/* initialize firmware update - take lock */
 static ssize_t zii_pic_store_update_firmware(struct device *dev,
 		struct device_attribute *attr,  const char *buf, size_t count)
 {
 	struct zii_pic_mfd *adev = dev_get_drvdata(dev);
 	int ret;
 
-	/* TODO: what would be proper locking for the PIC?
-	 * - atomic
-	 * - mutex
-	 * - prevent any other commands execution? */
-	if (atomic_read(&adev->fw_update_state))
-		return -EBUSY;
-
+	mutex_lock(&adev->mutex);
 	atomic_set(&adev->fw_update_state, 1);
 
 	ret = request_firmware_nowait(THIS_MODULE, true,
@@ -830,17 +855,20 @@ static ssize_t zii_pic_store_update_firmware(struct device *dev,
 					adev->dev, GFP_KERNEL, adev,
 					zii_pic_upload_firmware);
 
-	if (!ret)
+	if (!ret) {
+		/* mutex remains locked */
 		return count;
+	}
 
 	pr_err("%s: failed to request firmware\n", __func__);
 	atomic_set(&adev->fw_update_state, 0);
+	mutex_unlock(&adev->mutex);
 	return ret;
 }
 static DEVICE_ATTR(update_firmware, S_IWUSR,
 		NULL, zii_pic_store_update_firmware);
 
-
+/* no locking */
 static ssize_t zii_pic_show_update_firmware_status(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
@@ -939,6 +967,7 @@ static int zii_pic_mfd_probe(struct device *dev)
 
 	adev->dev = dev;
 	adev->hw_id = (enum zii_pic_hw_id)id->data;
+	mutex_init(&adev->mutex);
 
 	if (of_property_read_u32(dev->of_node, "current-speed", &baud))
 		adev->baud = ZII_PIC_DEFAULT_BAUD_RATE;
@@ -980,12 +1009,15 @@ static int zii_pic_mfd_remove(struct device *dev)
 	return 0;
 }
 
+/* entry point - locking needed */
 int zii_pic_watchdog_enable(struct device *pic_dev)
 {
 	struct zii_pic_mfd *adev = dev_get_drvdata(pic_dev);
 	int ret;
 
 	pr_debug("%s: enter\n", __func__);
+
+	mutex_lock(&adev->mutex);
 
 	if (adev->hw_id == PIC_HW_ID_RDU2) {
 		u8 cmd_data[2] = { 1, adev->watchdog_timeout };
@@ -1002,13 +1034,15 @@ int zii_pic_watchdog_enable(struct device *pic_dev)
 	else
 		adev->watchdog_enabled = 1;
 
+	mutex_unlock(&adev->mutex);
+
 	return ret;
 }
 EXPORT_SYMBOL(zii_pic_watchdog_enable);
 
-int zii_pic_watchdog_disable(struct device *pic_dev)
+/* called from locked contexts */
+static int zii_pic_watchdog_disable_locked(struct zii_pic_mfd *adev)
 {
-	struct zii_pic_mfd *adev = dev_get_drvdata(pic_dev);
 	int ret;
 
 	pr_debug("%s: enter\n", __func__);
@@ -1030,8 +1064,24 @@ int zii_pic_watchdog_disable(struct device *pic_dev)
 
 	return ret;
 }
+
+/* entry point - locking needed */
+int zii_pic_watchdog_disable(struct device *pic_dev)
+{
+	struct zii_pic_mfd *adev = dev_get_drvdata(pic_dev);
+	int ret;
+
+	pr_debug("%s: enter\n", __func__);
+
+	mutex_lock(&adev->mutex);
+	ret = zii_pic_watchdog_disable_locked(adev);
+	mutex_unlock(&adev->mutex);
+
+	return ret;
+}
 EXPORT_SYMBOL(zii_pic_watchdog_disable);
 
+/* entry point - locking needed */
 int zii_pic_watchdog_get_status(struct device *pic_dev)
 {
 	struct zii_pic_mfd *adev = dev_get_drvdata(pic_dev);
@@ -1049,8 +1099,10 @@ int zii_pic_watchdog_get_status(struct device *pic_dev)
 		return 0;
 	}
 
+	mutex_lock(&adev->mutex);
 	ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_SW_WDT_GET,
 				&data, sizeof(data));
+	mutex_unlock(&adev->mutex);
 
 	if (ret)
 		pr_err("Failed to get watchdog status (err = %d)\n", ret);
@@ -1059,6 +1111,7 @@ int zii_pic_watchdog_get_status(struct device *pic_dev)
 }
 EXPORT_SYMBOL(zii_pic_watchdog_get_status);
 
+/* entry point - locking needed */
 int zii_pic_watchdog_ping(struct device *pic_dev)
 {
 	struct zii_pic_mfd *adev = dev_get_drvdata(pic_dev);
@@ -1066,7 +1119,9 @@ int zii_pic_watchdog_ping(struct device *pic_dev)
 
 	pr_debug("%s: enter\n", __func__);
 
+	mutex_lock(&adev->mutex);
 	ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_PET_WDT, NULL, 0);
+	mutex_unlock(&adev->mutex);
 	if (ret)
 		pr_err("Failed to pet the dog (err = %d)\n", ret);
 
@@ -1074,6 +1129,7 @@ int zii_pic_watchdog_ping(struct device *pic_dev)
 }
 EXPORT_SYMBOL(zii_pic_watchdog_ping);
 
+/* entry point - locking needed */
 int zii_pic_watchdog_set_timeout(struct device *pic_dev,
 		unsigned int timeout)
 {
@@ -1085,6 +1141,8 @@ int zii_pic_watchdog_set_timeout(struct device *pic_dev,
 	if (timeout < ZII_PIC_WDT_MIN_TIMEOUT ||
 	    timeout > ZII_PIC_WDT_MAX_TIMEOUT)
 		return -EINVAL;
+
+	mutex_lock(&adev->mutex);
 
 	if (adev->hw_id == PIC_HW_ID_RDU2) {
 		u8 cmd_data[2] = { adev->watchdog_enabled, timeout };
@@ -1101,6 +1159,8 @@ int zii_pic_watchdog_set_timeout(struct device *pic_dev,
 	else
 		adev->watchdog_timeout = timeout;
 
+	mutex_unlock(&adev->mutex);
+
 	return ret;
 }
 EXPORT_SYMBOL(zii_pic_watchdog_set_timeout);
@@ -1114,6 +1174,8 @@ void zii_pic_watchdog_reset(struct device *pic_dev, bool hw_recovery)
 
 	if (!adev->hw_ops.reset)
 		return;
+
+	mutex_lock(&adev->mutex);
 
 	/* There is no way to get normal processing of response for this
 	 * command due to disabled scheduling when reset handler is called.
@@ -1133,20 +1195,27 @@ void zii_pic_watchdog_reset(struct device *pic_dev, bool hw_recovery)
 }
 EXPORT_SYMBOL(zii_pic_watchdog_reset);
 
+/* entry point - locking needed */
 int zii_pic_hwmon_read_sensor(struct device *pic_dev,
 			      enum zii_pic_sensor id, int *val)
 {
 	struct zii_pic_mfd *adev = dev_get_drvdata(pic_dev);
+	int ret;
 
 	pr_debug("%s: enter\n", __func__);
 
 	if (!adev->hw_ops.read_sensor)
 		return -ENOTSUPP;
 
-	return adev->hw_ops.read_sensor(adev, id, val);
+	mutex_lock(&adev->mutex);
+	ret = adev->hw_ops.read_sensor(adev, id, val);
+	mutex_unlock(&adev->mutex);
+
+	return ret;
 }
 EXPORT_SYMBOL(zii_pic_hwmon_read_sensor);
 
+/* called locked */
 static int zii_pic_eeprom_read_page(struct zii_pic_mfd *adev,
 		enum zii_pic_eeprom_type type, u16 page)
 {
@@ -1165,6 +1234,7 @@ static int zii_pic_eeprom_read_page(struct zii_pic_mfd *adev,
 	return zii_pic_mcu_cmd(adev, cmd, cmd_data, size);
 }
 
+/* called locked */
 static int zii_pic_eeprom_write_page(struct zii_pic_mfd *adev,
 		enum zii_pic_eeprom_type type, u16 page, const u8 *data)
 {
@@ -1186,6 +1256,7 @@ static int zii_pic_eeprom_write_page(struct zii_pic_mfd *adev,
 	return zii_pic_mcu_cmd(adev, cmd, cmd_data, size);
 }
 
+/* entry point - locking needed */
 int zii_pic_eeprom_read(struct device *pic_dev,
 		enum zii_pic_eeprom_type type, u16 reg,
 		void *val, size_t val_size)
@@ -1194,9 +1265,11 @@ int zii_pic_eeprom_read(struct device *pic_dev,
 	int page = reg / ZII_PIC_EEPROM_PAGE_SIZE;
 	int offset = reg & (ZII_PIC_EEPROM_PAGE_SIZE - 1);
 	size_t bytes_left = val_size;
-	int ret;
+	int ret = 0;
 
 	pr_debug("%s: enter\n", __func__);
+
+	mutex_lock(&adev->mutex);
 
 	do {
 		int count = min_t(int,
@@ -1204,7 +1277,7 @@ int zii_pic_eeprom_read(struct device *pic_dev,
 
 		ret = zii_pic_eeprom_read_page(adev, type, page);
 		if (ret)
-			return ret;
+			goto out;
 
 		pr_debug("%s: returning %d bytes from %d\n", __func__, count, val_size);
 		memcpy(val, adev->eeprom_page + offset, count);
@@ -1215,10 +1288,13 @@ int zii_pic_eeprom_read(struct device *pic_dev,
 		val += count;
 	} while (bytes_left);
 
-	return 0;
+out:
+	mutex_unlock(&adev->mutex);
+	return ret;
 }
 EXPORT_SYMBOL(zii_pic_eeprom_read);
 
+/* entry point - locking needed */
 int zii_pic_eeprom_write(struct device *pic_dev,
 		enum zii_pic_eeprom_type type, u16 reg,
 		const void *data, size_t size)
@@ -1227,9 +1303,11 @@ int zii_pic_eeprom_write(struct device *pic_dev,
 	int page = reg / ZII_PIC_EEPROM_PAGE_SIZE;
 	int offset = reg & (ZII_PIC_EEPROM_PAGE_SIZE - 1);
 	size_t bytes_left = size;
-	int ret;
+	int ret = 0;
 
 	pr_debug("%s: enter\n", __func__);
+
+	mutex_lock(&adev->mutex);
 
 	do {
 		int count = min_t(int,
@@ -1246,7 +1324,7 @@ int zii_pic_eeprom_write(struct device *pic_dev,
 			}
 		}
 		if (ret)
-			return ret;
+			goto out;
 
 		page++;
 		offset = 0;
@@ -1255,10 +1333,13 @@ int zii_pic_eeprom_write(struct device *pic_dev,
 
 	} while(bytes_left);
 
-	return 0;
+out:
+	mutex_unlock(&adev->mutex);
+	return ret;
 }
 EXPORT_SYMBOL(zii_pic_eeprom_write);
 
+/* locking needed: possible race against event raise */
 int zii_pic_register_pwrbutton_callback(struct device *pic_dev,
 		zii_pic_pwrbutton_callback_t callback,
 		void *pwrbutton)
@@ -1267,16 +1348,20 @@ int zii_pic_register_pwrbutton_callback(struct device *pic_dev,
 
 	pr_debug("%s: enter\n", __func__);
 
+	mutex_lock(&adev->mutex);
 	adev->pwrbutton_event = callback;
 	adev->pwrbutton = pwrbutton;
+	mutex_unlock(&adev->mutex);
 
 	return 0;
 }
 EXPORT_SYMBOL(zii_pic_register_pwrbutton_callback);
 
+/* entry point - locking needed */
 int zii_pic_backlight_set(struct device *pic_dev, int intensity)
 {
 	struct zii_pic_mfd *adev = dev_get_drvdata(pic_dev);
+	int ret;
 	u8 data[3] = {0, 0, 0};
 
 	pr_debug("%s: enter\n", __func__);
@@ -1288,7 +1373,11 @@ int zii_pic_backlight_set(struct device *pic_dev, int intensity)
 	if (intensity)
 		data[0] |= 0x80;
 
-	return zii_pic_mcu_cmd(adev, ZII_PIC_CMD_BACKLIGHT, data, sizeof(data));
+	mutex_lock(&adev->mutex);
+	ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_BACKLIGHT, data, sizeof(data));
+	mutex_unlock(&adev->mutex);
+
+	return ret;
 }
 EXPORT_SYMBOL(zii_pic_backlight_set);
 
