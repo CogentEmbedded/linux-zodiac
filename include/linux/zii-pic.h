@@ -129,6 +129,12 @@ enum zii_pic_eeprom_type {
 	DDS_EEPROM
 };
 
+const char *zii_pic_eeprom_name(struct device *pic_dev,
+		enum zii_pic_eeprom_type type);
+
+size_t zii_pic_eeprom_size(struct device *pic_dev,
+		enum zii_pic_eeprom_type type);
+
 int zii_pic_eeprom_read(struct device *pic_dev,
 		enum zii_pic_eeprom_type type, u16 reg,
 		void *val, size_t val_size);

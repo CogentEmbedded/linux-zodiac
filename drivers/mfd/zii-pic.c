@@ -1256,6 +1256,34 @@ static int zii_pic_eeprom_write_page(struct zii_pic_mfd *adev,
 	return zii_pic_mcu_cmd(adev, cmd, cmd_data, size);
 }
 
+/* no locking */
+const char *zii_pic_eeprom_name(struct device *pic_dev,
+		enum zii_pic_eeprom_type type)
+{
+	BUG_ON(type != MAIN_EEPROM && type != DDS_EEPROM);
+
+	if (type == MAIN_EEPROM)
+		return ZII_PIC_NAME_MAIN_EEPROM;
+	else
+		return ZII_PIC_NAME_DDS_EEPROM;
+}
+EXPORT_SYMBOL(zii_pic_eeprom_name);
+
+/* no locking */
+size_t zii_pic_eeprom_size(struct device *pic_dev,
+		enum zii_pic_eeprom_type type)
+{
+	struct zii_pic_mfd *adev = dev_get_drvdata(pic_dev);
+
+	BUG_ON(type != MAIN_EEPROM && type != DDS_EEPROM);
+
+	if (type == MAIN_EEPROM || adev->hw_id == PIC_HW_ID_RDU2)
+		return 0x4000;
+	else
+		return 0x2000;
+}
+EXPORT_SYMBOL(zii_pic_eeprom_size);
+
 /* entry point - locking needed */
 int zii_pic_eeprom_read(struct device *pic_dev,
 		enum zii_pic_eeprom_type type, u16 reg,

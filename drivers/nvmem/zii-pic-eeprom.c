@@ -32,51 +32,35 @@
 
 struct zii_pic_eeprom {
 	struct device *pic_dev;
+	enum zii_pic_eeprom_type type;
 	struct nvmem_device *nvmem;
 };
 
-#define io_routine_name(type, dir)  zii_pic_eeprom_##type##_##dir
+static int zii_pic_eeprom_reg_read(void *priv, unsigned int offset,
+		void *val, size_t bytes)
+{
+	struct zii_pic_eeprom *adev = priv;
 
-#define io_routine(type, dir)					\
-	static int io_routine_name(type, dir)(void *priv,	\
-			unsigned int offset, void *val, size_t bytes) \
-	{							\
-		struct zii_pic_eeprom *adev = priv;		\
-								\
-		pr_debug("%s: enter\n", __func__);		\
-								\
-		return zii_pic_eeprom_##dir(adev->pic_dev,	\
-			type##_EEPROM, offset, val, bytes);	\
-	}
+	pr_debug("%s: enter\n", __func__);
 
-io_routine(MAIN, read)
-io_routine(MAIN, write)
-io_routine(DDS, read)
-io_routine(DDS, write)
+	return zii_pic_eeprom_read(adev->pic_dev, adev->type,
+			offset, val, bytes);
+}
 
-static const struct nvmem_config zii_pic_main_eeprom_config = {
-	.name = ZII_PIC_NAME_MAIN_EEPROM,
-	.owner = THIS_MODULE,
-	.reg_read = io_routine_name(MAIN, read),
-	.reg_write = io_routine_name(MAIN, write),
-	.size = 0x4000,
-	.word_size = 1,
-	.stride = 1,
-};
+static int zii_pic_eeprom_reg_write(void *priv, unsigned int offset,
+		void *val, size_t bytes)
+{
+	struct zii_pic_eeprom *adev = priv;
 
-static const struct nvmem_config zii_pic_dds_eeprom_config = {
-	.name = ZII_PIC_NAME_DDS_EEPROM,
-	.owner = THIS_MODULE,
-	.reg_read = io_routine_name(DDS, read),
-	.reg_write = io_routine_name(DDS, write),
-	.size = 0x2000,
-	.word_size = 1,
-	.stride = 1,
-};
+	pr_debug("%s: enter\n", __func__);
+
+	return zii_pic_eeprom_write(adev->pic_dev, adev->type,
+			offset, val, bytes);
+}
 
 static const struct of_device_id zii_pic_eeprom_of_match[] = {
-	{ .compatible = "zii,pic-main-eeprom", .data = &zii_pic_main_eeprom_config},
-	{ .compatible = "zii,pic-dds-eeprom", .data = &zii_pic_dds_eeprom_config},
+	{ .compatible = "zii,pic-main-eeprom", .data = (void *)MAIN_EEPROM },
+	{ .compatible = "zii,pic-dds-eeprom", .data = (void *)DDS_EEPROM },
 	{}
 };
 
@@ -96,19 +80,28 @@ static int zii_pic_eeprom_probe(struct platform_device *pdev)
 	adev = devm_kzalloc(dev, sizeof(*adev), GFP_KERNEL);
 	if (!adev)
 		return -ENOMEM;
+	platform_set_drvdata(pdev, adev);
 
 	adev->pic_dev = dev->parent;
-	config = *((struct nvmem_config *)id->data);
+	adev->type = (enum zii_pic_eeprom_type) id->data;
+
+	memset(&config, 0, sizeof(config));
+	config.owner = THIS_MODULE;
 	config.dev = dev;
 	config.priv = adev;
+	config.name = zii_pic_eeprom_name(adev->pic_dev, adev->type);
+	config.size = zii_pic_eeprom_size(adev->pic_dev, adev->type);
+	config.reg_read = zii_pic_eeprom_reg_read;
+	config.reg_write = zii_pic_eeprom_reg_write;
+	config.word_size = 1;
+	config.stride = 1;
+
 	adev->nvmem = nvmem_register(&config);
 	if (IS_ERR(adev->nvmem)) {
 		pr_err("%s: nvmem register failed (err = %ld)\n",
 			__func__, PTR_ERR(adev->nvmem));
 		return PTR_ERR(adev->nvmem);
 	}
-
-	platform_set_drvdata(pdev, adev);
 
 	return 0;
 }
