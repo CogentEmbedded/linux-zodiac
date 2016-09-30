@@ -337,7 +337,8 @@ static int zii_pic_configure(struct zii_pic_mfd *adev)
 {
 	struct ktermios ktermios;
 	int checksum_type;
-	int ret;
+	struct device_node *np;
+	int i, ret;
 
 	pr_debug("%s: enter\n", __func__);
 
@@ -416,10 +417,19 @@ static int zii_pic_configure(struct zii_pic_mfd *adev)
 	if (ret)
 		return ret;
 
-	ret = mfd_add_devices(adev->dev, -1, zii_pic_devices,
-			ARRAY_SIZE(zii_pic_devices), NULL, 0, NULL);
-	if (ret)
-		return ret;
+	/* register cells for devices defined in DT */
+	for_each_child_of_node(adev->dev->of_node, np) {
+		for (i = 0; i < ARRAY_SIZE(zii_pic_devices); i++) {
+			const struct mfd_cell *cell = &zii_pic_devices[i];
+			if (of_device_is_compatible(np, cell->of_compatible)) {
+				ret = mfd_add_devices(adev->dev, -1, cell, 1,
+					NULL, 0, NULL);
+				if (ret)
+					return ret;
+				break;
+			}
+		}
+	}
 
 	return 0;
 }
