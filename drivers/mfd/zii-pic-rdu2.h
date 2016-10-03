@@ -29,6 +29,9 @@ int zii_pic_rdu2_process_voltage_response(struct zii_pic_mfd *adev,
 int zii_pic_rdu2_process_current_response(struct zii_pic_mfd *adev,
 					u8 *data, u8 size);
 
+int zii_pic_rdu2_process_led_cmd(struct zii_pic_mfd *adev,
+					u8 *data, u8 size);
+
 int zii_pic_rdu2_init(struct zii_pic_mfd *adev);
 
 extern struct zii_pic_cmd_desc zii_pic_rdu2_cmds[ZII_PIC_CMD_COUNT];

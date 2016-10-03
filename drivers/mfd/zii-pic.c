@@ -111,6 +111,10 @@ static const struct mfd_cell zii_pic_devices[] = {
 		.of_compatible = "zii,pic-backlight",
 		.name = ZII_PIC_NAME_BACKLIGHT,
 	},
+	{
+		.of_compatible = "zii,pic-leds",
+		.name = ZII_PIC_NAME_LEDS,
+	},
 };
 
 static int zii_pic_process_firmware(struct zii_pic_mfd *adev,
@@ -1420,6 +1424,58 @@ int zii_pic_backlight_set(struct device *pic_dev, int intensity)
 EXPORT_SYMBOL(zii_pic_backlight_set);
 
 
+/* entry point - locking needed */
+int zii_pic_led_set(struct device *pic_dev, enum zii_led_id id,
+		enum zii_led_state state, u8 a, u8 r, u8 g, u8 b)
+{
+	struct zii_pic_mfd *adev = dev_get_drvdata(pic_dev);
+	u8 data[9] = { 1, id, state, 0, 0, a, r, g, b };
+	int ret;
+
+	pr_debug("%s: enter\n", __func__);
+
+	/* support only RDU2 for now */
+	if (WARN_ON_ONCE(adev->hw_id != PIC_HW_ID_RDU2))
+		return -EIO;
+
+	mutex_lock(&adev->mutex);
+	ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_LED_CTRL, data, sizeof(data));
+	mutex_unlock(&adev->mutex);
+
+	return ret;
+}
+EXPORT_SYMBOL(zii_pic_led_set);
+
+/* entry point - locking needed */
+int zii_pic_led_get(struct device *pic_dev, enum zii_led_id id,
+		enum zii_led_state *state, u8 *a, u8 *r, u8 *g, u8 *b)
+{
+	struct zii_pic_mfd *adev = dev_get_drvdata(pic_dev);
+	int ret;
+	u8 data[9] = { 0, id, 0, 0, 0, 0, 0, 0, 0 };
+
+	pr_debug("%s: enter\n", __func__);
+
+	/* support only RDU2 for now */
+	if (WARN_ON_ONCE(adev->hw_id != PIC_HW_ID_RDU2))
+		return -EIO;
+
+	mutex_lock(&adev->mutex);
+
+	ret = zii_pic_mcu_cmd(adev, ZII_PIC_CMD_LED_CTRL, data, sizeof(data));
+	if (!ret) {
+		*state = adev->led_state;
+		*a = adev->led_a;
+		*r = adev->led_r;
+		*g = adev->led_g;
+		*b = adev->led_b;
+	}
+
+	mutex_unlock(&adev->mutex);
+
+	return ret;
+}
+EXPORT_SYMBOL(zii_pic_led_get);
 
 
 static struct device_driver zii_pic_mfd_drv = {

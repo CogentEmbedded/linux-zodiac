@@ -93,6 +93,8 @@ struct zii_pic_cmd_desc zii_pic_rdu2_cmds[ZII_PIC_CMD_COUNT] = {
 	{0xB0, 0, NULL},
 	/* ZII_PIC_CMD_BOOTLOADER */
 	{0xB1, 0xff, NULL},
+	/* ZII_PIC_CMD_LED_CTRL */
+	{0x28, 9, zii_pic_rdu2_process_led_cmd},
 };
 
 int zii_pic_rdu2_process_voltage_response(struct zii_pic_mfd *adev,
@@ -120,6 +122,23 @@ int zii_pic_rdu2_process_current_response(struct zii_pic_mfd *adev,
 
 	/* convert to mA  */
 	adev->sensor_current = zii_pic_f88_to_int(data);
+	return 0;
+}
+
+int zii_pic_rdu2_process_led_cmd(struct zii_pic_mfd *adev,
+					u8 *data, u8 size)
+{
+	pr_debug("%s: enter\n", __func__);
+
+	if (size != 5)
+		return -EINVAL;
+
+	adev->led_state = data[0];
+	adev->led_a = data[1];
+	adev->led_r = data[2];
+	adev->led_g = data[3];
+	adev->led_b = data[4];
+
 	return 0;
 }
 

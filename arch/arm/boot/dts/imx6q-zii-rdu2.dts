@@ -20,18 +20,6 @@
 
 	chosen {
 		linux,stdout-path = &uart1;
-		// FIXME mdio-gpio mdio: failed to get alias id
-//		mdio-gpio0 = &mdio1;
-	};
-
-	mdio1: mdio {
-		compatible = "virtual,mdio-gpio";
-		#address-cells = <1>;
-		#size-cells = <0>;
-		pinctrl-names = "default";
-		pinctrl-0 = <&pinctrl_mdio1>;
-		gpios = <&gpio6 5 GPIO_ACTIVE_HIGH
-		     	&gpio6 4 GPIO_ACTIVE_HIGH>;
 	};
 
 	regulators {
@@ -342,6 +330,11 @@
 
 		backlight {
 			compatible = "zii,pic-backlight";
+			status = "okay";
+		};
+
+		leds {
+			compatible = "zii,pic-leds";
 			status = "okay";
 		};
 	};
@@ -670,8 +663,19 @@
 	pinctrl-0 = <&pinctrl_pcie>;
 	reset-gpio = <&gpio7 12 GPIO_ACTIVE_LOW>;
 	status = "okay";
-};
 
+	/* soc pcie bridge 00:00.0 */
+	pcie@0,0 {
+		reg = <0x000000 0 0 0 0>;
+		#address-cells = <3>;
+		#size-cells = <2>;
+
+		/* pcie endpoint 01:00.0 */
+		i210: intel,i210@pcie0,0 {
+			reg = <0x010000 0 0 0 0>;
+		};
+	};
+};
 
 &usdhc2 {
 	pinctrl-names = "default", "state_100mhz", "state_200mhz";
@@ -715,34 +719,6 @@
 	target-supply = <&reg_3p3v_ssd>;
 };
 
-&fec {
-	pinctrl-names = "default";
-	pinctrl-0 = <&pinctrl_enet>;
-	vcc-supply = <&vgen2_reg>;
-	phy-mode = "rmii";
-	phy-reset-gpios = <&gpio1 23 0 GPIO_ACTIVE_LOW>;
-	status = "okay";
-	phy-handle = <&ethphy>;
-	phy-reset-duration = "100";
-	phy-supply = <&reg_3p3v>;
-
-	mdio {
-		#address-cells = <1>;
-		#size-cells = <0>;
-
-		/* Micrel KSZ8091RNA1A, with its own 25 MHz crystal */
-		ethphy: ethernet-phy@0 {
-			pinctrl-names = "default";
-			pinctrl-0 = <&pinctrl_rmii_phy_irq>;
-			compatible = "ethernet-phy-ieee802.3-c22";
-			reg = <0>;
-			max-speed = <100>;
-			/* interrupt can be low or high active, depending on bit 9 in register 0x1f */
-			interrupts-extended = <&gpio3 30 GPIO_ACTIVE_LOW>;
-		};
-	};
-};
-
 &usbh1 {
 	vbus-supply = <&reg_usb_h1_vbus>;
 	status = "okay";
@@ -754,6 +730,85 @@
 	dr_mode = "host";
 	status = "okay";
 };
+
+
+
+/ {
+	mdio_gpio: mdio {
+		compatible = "virtual,mdio-gpio";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_mdio_gpio>;
+		gpios = <&gpio6 5 GPIO_ACTIVE_HIGH>, <&gpio6 4 GPIO_ACTIVE_HIGH>;
+
+		/* Micrel KSZ8091RNA1A, with its own 25 MHz crystal */
+		phy_chip: ethernet-phy@0 {
+			//pinctrl-names = "default";
+			//pinctrl-0 = <&pinctrl_rmii_phy_irq>;
+			compatible = "ethernet-phy-ieee802.3-c22";
+			reg = <0>;
+			max-speed = <100>;
+			/* interrupt can be low or high active, depending on bit 9 in register 0x1f */
+			//interrupts-extended = <&gpio3 30 GPIO_ACTIVE_LOW>;
+		};
+	};
+
+	aliases {
+		mdio-gpio0 = &mdio_gpio;	/* required for mdio-gpio driver */
+	};
+};
+
+&fec {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_enet>;
+	vcc-supply = <&vgen2_reg>;
+	phy-mode = "rmii";
+	phy-handle = <&phy_chip>;
+	phy-reset-gpios = <&gpio1 23 0>;
+	status = "okay";
+
+	mdio_fec: mdio {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		status = "okay";
+
+		switch@0 {
+			compatible = "marvell,mv88e6085";
+			reg = <0>;
+			eeprom-length = <512>;
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+				port@0 {
+					reg = <0>;
+					//label = "i210-port";
+					label = "cpu";
+					ethernet = <&i210>;
+				};
+				port@1 {
+					reg = <1>;
+					label = "netaux";
+				};
+				port@2 {
+					reg = <2>;
+					label = "fec-port";
+					//label = "cpu";
+					//ethernet = <&fec>;
+				};
+				port@3 {
+					reg = <3>;
+					label = "netright";
+				};
+				port@4 {
+					reg = <4>;
+					label = "netleft";
+				};
+			};
+		};
+	};
+};
+
 
 &iomuxc {
 	pinctrl-names = "default";
@@ -1140,7 +1195,7 @@
 			>;
 		};
 
-		pinctrl_mdio1: bitbangmdiogrp {
+		pinctrl_mdio_gpio: bitbangmdiogrp {
 			fsl,pins = <
 				/* Bitbang MDIO for DEB Switch */
 				MX6QDL_PAD_CSI0_DAT19__GPIO6_IO05	0x4001b030 /*SWITCH_MDC*/

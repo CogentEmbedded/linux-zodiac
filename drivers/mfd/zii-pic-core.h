@@ -139,6 +139,8 @@ struct zii_pic_mfd {
 
 	atomic_t			fw_update_state;
 	int				fw_update_progress;
+
+	u8				led_state, led_a, led_r, led_g, led_b;
 };
 
 /* Convert 8.8 fixed point value multiplied by 1000 to integer.

@@ -8,6 +8,7 @@
 #define ZII_PIC_NAME_DDS_EEPROM		"pic-dds-eeprom"
 #define ZII_PIC_NAME_PWRBUTTON		"pic-pwrbutton"
 #define ZII_PIC_NAME_BACKLIGHT		"pic-backlight"
+#define ZII_PIC_NAME_LEDS		"pic-leds"
 
 #define ZII_PIC_DEFAULT_BAUD_RATE	57600
 
@@ -55,6 +56,9 @@ enum zii_pic_cmd_id {
 	/* PIC Bootloader commands */
 	ZII_PIC_CMD_JMP_TO_BOOTLOADER,
 	ZII_PIC_CMD_BOOTLOADER,
+
+	/* LED control */
+	ZII_PIC_CMD_LED_CTRL,
 
 	/* Add new command IDs here */
 
@@ -153,5 +157,26 @@ int zii_pic_register_pwrbutton_callback(struct device *pic_dev,
 
 /* LCD Backlight */
 int zii_pic_backlight_set(struct device *pic_dev, int intensity);
+
+/* LEDS */
+
+enum zii_led_id {
+	ZII_FRONT_PANEL_LED = 0x0,
+	ZII_MOOD_LED = 0x1,
+	ZII_READING_LED = 0x2,
+
+	ZII_LEDS_NR,
+};
+
+enum zii_led_state {
+	ZII_LED_STATE_OFF = 0x0,
+	ZII_LED_STATE_ON = 0x1,
+};
+
+int zii_pic_led_set(struct device *pic_dev, enum zii_led_id led,
+		enum zii_led_state state, u8 a, u8 r, u8 g, u8 b);
+
+int zii_pic_led_get(struct device *pic_dev, enum zii_led_id led,
+		enum zii_led_state *state, u8 *a, u8 *r, u8 *g, u8 *b);
 
 #endif /* _LINUX_ZII_PIC_H_ */
