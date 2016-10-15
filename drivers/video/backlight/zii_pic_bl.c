@@ -49,7 +49,7 @@ static const struct backlight_ops zii_pic_bl_ops = {
 };
 
 static struct backlight_properties zii_pic_bl_props = {
-	.type = BACKLIGHT_RAW,
+	.type = BACKLIGHT_FIRMWARE,
 	.max_brightness = 100,
 	.brightness = 50,
 };
