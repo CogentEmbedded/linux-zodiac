@@ -557,6 +557,8 @@ struct fec_enet_private {
 	unsigned int tx_align;
 	unsigned int rx_align;
 
+	unsigned int max_fl;
+
 	/* hw interrupt coalesce */
 	unsigned int rx_pkts_itr;
 	unsigned int rx_time_itr;
