@@ -38,6 +38,11 @@ struct dsa_slave_priv {
 	int			old_pause;
 	int			old_duplex;
 
+	struct net_device	*bridge_dev;
+
+	int module_eeprom_type, module_eeprom_len;
+	struct i2c_adapter *module_eeprom_i2c;
+
 #ifdef CONFIG_NET_POLL_CONTROLLER
 	struct netpoll		*netpoll;
 #endif
