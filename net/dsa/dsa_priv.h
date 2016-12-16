@@ -45,6 +45,9 @@ struct dsa_slave_priv {
 
 	/* TC context */
 	struct list_head	mall_tc_list;
+
+	int module_eeprom_type, module_eeprom_len;
+	struct i2c_adapter *module_eeprom_i2c;
 };
 
 /* debugfs.c */

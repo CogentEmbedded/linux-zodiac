@@ -23,6 +23,7 @@
 #include <net/tc_act/tc_mirred.h>
 #include <linux/if_bridge.h>
 #include <linux/netpoll.h>
+#include <linux/i2c.h>
 #include "dsa_priv.h"
 
 static bool dsa_slave_dev_check(struct net_device *dev);
@@ -979,6 +980,82 @@ static int dsa_slave_get_eee(struct net_device *dev, struct ethtool_eee *e)
 	return ret;
 }
 
+static int dsa_slave_get_module_info(struct net_device *dev,
+		struct ethtool_modinfo *modinfo)
+{
+	struct dsa_slave_priv *p = netdev_priv(dev);
+
+	if (!p->module_eeprom_type)
+		return -EOPNOTSUPP;
+
+	modinfo->type = p->module_eeprom_type;
+	modinfo->eeprom_len = p->module_eeprom_len;
+	return 0;
+}
+
+static int module_eeprom_read(struct dsa_slave_priv *p,
+		u8 bus_addr, u8 dev_addr, void *buf, size_t len)
+{
+	struct i2c_msg msgs[2];
+	int ret;
+
+	if (!p->module_eeprom_i2c)
+		return -ENODEV;
+
+	msgs[0].addr = bus_addr;
+	msgs[0].flags = 0;
+	msgs[0].len = 1;
+	msgs[0].buf = &dev_addr;
+	msgs[1].addr = bus_addr;
+	msgs[1].flags = I2C_M_RD;
+	msgs[1].len = len;
+	msgs[1].buf = buf;
+
+	ret = i2c_transfer(p->module_eeprom_i2c, msgs, ARRAY_SIZE(msgs));
+	if (ret < 0)
+		return ret;
+
+	return ret == ARRAY_SIZE(msgs) ? len : 0;
+}
+
+static int dsa_slave_get_module_eeprom(struct net_device *dev,
+		struct ethtool_eeprom *ee, u8 *data)
+{
+	struct dsa_slave_priv *p = netdev_priv(dev);
+	unsigned int first, last, len;
+	int ret;
+
+	if (!p->module_eeprom_type)
+		return -EOPNOTSUPP;
+
+	if (ee->len == 0)
+		return -EINVAL;
+
+	first = ee->offset;
+	last = ee->offset + ee->len;
+	if (first < ETH_MODULE_SFF_8079_LEN) {
+		len = last;
+		if (len > ETH_MODULE_SFF_8079_LEN)
+			len = ETH_MODULE_SFF_8079_LEN;
+		len -= first;
+
+		ret = module_eeprom_read(p, 0x50, first, data, len);
+		if (ret < 0)
+			return ret;
+
+		first += len;
+		data += len;
+	}
+	if (first >= ETH_MODULE_SFF_8079_LEN && last > first) {
+		len = last - first;
+
+		ret = module_eeprom_read(p, 0x51, first, data, len);
+		if (ret < 0)
+			return ret;
+	}
+	return 0;
+}
+
 #ifdef CONFIG_NET_POLL_CONTROLLER
 static int dsa_slave_netpoll_setup(struct net_device *dev,
 				   struct netpoll_info *ni)
@@ -1211,6 +1288,8 @@ static const struct ethtool_ops dsa_slave_ethtool_ops = {
 	.set_link_ksettings	= dsa_slave_set_link_ksettings,
 	.get_rxnfc		= dsa_slave_get_rxnfc,
 	.set_rxnfc		= dsa_slave_set_rxnfc,
+	.get_module_info	= dsa_slave_get_module_info,
+	.get_module_eeprom	= dsa_slave_get_module_eeprom,
 };
 
 static const struct net_device_ops dsa_slave_netdev_ops = {
@@ -1433,6 +1512,47 @@ int dsa_slave_resume(struct net_device *slave_dev)
 	return 0;
 }
 
+static int dsa_slave_module_eeprom_setup(struct net_device *slave_dev)
+{
+	struct dsa_slave_priv *p = netdev_priv(slave_dev);
+	struct device_node *port_dn, *i2c_dn;
+	u32 eeprom_type = 0;
+	struct i2c_adapter *i2c;
+
+	port_dn = p->dp->dn;
+
+	of_property_read_u32(port_dn, "module-eeprom-type", &eeprom_type);
+
+	if (eeprom_type == 8472) {
+		p->module_eeprom_type = ETH_MODULE_SFF_8472;
+		p->module_eeprom_len = ETH_MODULE_SFF_8472_LEN;
+	} else if (eeprom_type == 8079) {
+		p->module_eeprom_type = ETH_MODULE_SFF_8079;
+		p->module_eeprom_len = ETH_MODULE_SFF_8079_LEN;
+	} else
+		return 0;		/* ignore whatever else */
+
+	i2c_dn = of_parse_phandle(port_dn, "module-eeprom-i2c", 0);
+	if (!i2c_dn) {
+		netdev_warn(slave_dev, "can't parse module-eeprom-i2c\n");
+		return 0;	/* don't fail init */
+	}
+
+	i2c = of_find_i2c_adapter_by_node(i2c_dn);
+	of_node_put(i2c_dn);
+	if (!i2c)
+		return -EPROBE_DEFER;
+
+	if (!i2c_check_functionality(i2c, I2C_FUNC_I2C)) {
+		netdev_warn(slave_dev, "module-eeprom-i2c is unusable\n");
+		i2c_put_adapter(i2c);
+		return 0;	/* don't fail init */
+	}
+
+	p->module_eeprom_i2c = i2c;
+	return 0;
+}
+
 int dsa_slave_create(struct dsa_switch *ds, struct device *parent,
 		     int port, const char *name)
 {
@@ -1478,6 +1598,12 @@ int dsa_slave_create(struct dsa_switch *ds, struct device *parent,
 	p->old_link = -1;
 	p->old_duplex = -1;
 
+	ret = dsa_slave_module_eeprom_setup(slave_dev);
+	if (ret) {
+		free_netdev(slave_dev);
+		return ret;
+	}
+
 	ds->ports[port].netdev = slave_dev;
 	ret = register_netdev(slave_dev);
 	if (ret) {
@@ -1516,6 +1642,8 @@ void dsa_slave_destroy(struct net_device *slave_dev)
 			of_phy_deregister_fixed_link(port_dn);
 	}
 	unregister_netdev(slave_dev);
+	if (p->module_eeprom_i2c)
+		i2c_put_adapter(p->module_eeprom_i2c);
 	free_netdev(slave_dev);
 }
 

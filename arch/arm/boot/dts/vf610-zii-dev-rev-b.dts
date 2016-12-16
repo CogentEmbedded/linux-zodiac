@@ -268,6 +268,8 @@
 					port@3 {
 						reg = <3>;
 						label = "optical3";
+						module-eeprom-type = <8472>;
+						module-eeprom-i2c = <&o3_i2c>;
 
 						fixed-link {
 							speed = <1000>;
@@ -280,6 +282,8 @@
 					port@4 {
 						reg = <4>;
 						label = "optical4";
+						module-eeprom-type = <8472>;
+						module-eeprom-i2c = <&o4_i2c>;
 
 						fixed-link {
 							speed = <1000>;
@@ -411,26 +415,16 @@
 			};
 		};
 
-		i2c@2 {
+		o3_i2c: i2c@2 {
 			#address-cells = <1>;
 			#size-cells = <0>;
 			reg = <2>;
-
-			sfp3: at24c04@50 {
-				compatible = "atmel,24c02";
-				reg = <0x50>;
-			};
 		};
 
-		i2c@3 {
+		o4_i2c: i2c@3 {
 			#address-cells = <1>;
 			#size-cells = <0>;
 			reg = <3>;
-
-			sfp4: at24c04@50 {
-				compatible = "atmel,24c02";
-				reg = <0x50>;
-			};
 		};
 
 		i2c@4 {
