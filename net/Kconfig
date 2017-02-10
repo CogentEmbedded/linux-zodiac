@@ -363,6 +363,7 @@ endmenu
 
 endmenu
 
+source "net/arinc429/Kconfig"
 source "net/ax25/Kconfig"
 source "net/can/Kconfig"
 source "net/irda/Kconfig"
