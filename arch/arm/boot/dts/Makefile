@@ -16,7 +16,6 @@ dtb-$(CONFIG_SOC_AT91SAM9) += \
 	aks-cdu.dtb \
 	ethernut5.dtb \
 	evk-pro3.dtb \
-	tny_a9260.dtb \
 	usb_a9260.dtb \
 	at91sam9260ek.dtb \
 	at91sam9261ek.dtb \
@@ -443,7 +442,10 @@ dtb-$(CONFIG_SOC_VF610) += \
 	vf610m4-cosmic.dtb \
 	vf610-twr.dtb \
 	vf610-zii-dev-rev-b.dtb \
-	vf610-zii-dev-rev-c.dtb
+	vf610-zii-dev-rev-c.dtb \
+	vf610-zii-scu4-aib.dtb \
+	vf610-zii-spu3.dtb \
+	vf610-zii-cfu1.dtb
 dtb-$(CONFIG_ARCH_MXS) += \
 	imx23-evk.dtb \
 	imx23-olinuxino.dtb \
