@@ -1,0 +1,26 @@
+#
+# Platform support for Zodiac RAVE hardware
+#
+
+menuconfig RAVE_PLATFORMS
+	bool "Platform support for Zodiac RAVE hardware"
+	depends on SERIAL_DEV_BUS && SERIAL_DEV_CTRL_TTYPORT
+	help
+	  Say Y here to get to see options for platform support for
+	  various devices present in RAVE hardware. This option alone
+	  does not add any kernel code.
+
+	  If you say N, all options in this submenu will be skipped
+	  and disabled.
+
+if RAVE_PLATFORMS
+
+config RAVE_SP_CORE
+	tristate "RAVE SP MCU core driver"
+	select MFD_CORE
+	select CRC_CCITT
+	help
+	  Select this to get support for the Supervisory Processor
+	  device found on several devices in RAVE line of hardware.
+
+endif
