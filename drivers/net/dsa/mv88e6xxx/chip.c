@@ -2324,11 +2324,64 @@ static int mv88e6xxx_setup(struct dsa_switch *ds)
 	struct mv88e6xxx_chip *chip = ds->priv;
 	int err;
 	int i;
+	u16 reg;
+	u16 orig_port_state[mv88e6xxx_num_ports(chip)];
 
 	chip->ds = ds;
 	ds->slave_mii_bus = mv88e6xxx_default_mdio_bus(chip);
 
 	mutex_lock(&chip->reg_lock);
+
+	/* Fixing errata associated with 6390 and 6390X copper ports
+	 * 1. Disable all ports via port register 4
+	 * 2. Write values specified by Marvell to hidden registers
+	 *    in port 4 and 5s address space.
+	 * 3. SW reset of the chip
+	 * 4. Reset all ports back to the state they were in
+	 */
+	if (chip->info->prod_num == PORT_SWITCH_ID_PROD_NUM_6390X ||
+	    chip->info->prod_num == PORT_SWITCH_ID_PROD_NUM_6390) {
+		for (i = 0; i < mv88e6xxx_num_ports(chip); i++) {
+			err = mv88e6xxx_port_read(chip, i, PORT_CONTROL, &reg);
+			if (err)
+				return err;
+			orig_port_state[i] = reg;
+
+			reg &= ~PORT_CONTROL_STATE_MASK;
+			err = mv88e6xxx_port_write(chip, i, PORT_CONTROL, reg);
+			if (err)
+				return err;
+		}
+
+		mv88e6xxx_port_write(chip, 5, 0x1A, 0x01C0);
+		mv88e6xxx_port_write(chip, 4, 0x1A, 0xFC00);
+		mv88e6xxx_port_write(chip, 4, 0x1A, 0xFC20);
+		mv88e6xxx_port_write(chip, 4, 0x1A, 0xFC40);
+		mv88e6xxx_port_write(chip, 4, 0x1A, 0xFC60);
+		mv88e6xxx_port_write(chip, 4, 0x1A, 0xFC80);
+		mv88e6xxx_port_write(chip, 4, 0x1A, 0xFCA0);
+		mv88e6xxx_port_write(chip, 4, 0x1A, 0xFCC0);
+		mv88e6xxx_port_write(chip, 4, 0x1A, 0xFCE0);
+		mv88e6xxx_port_write(chip, 4, 0x1A, 0xFD00);
+
+		/* The data sheet says a 2 ms sleep is needed after
+		 * disabling the ports prior to a reset otherwise
+		 * CRC errors may be observed.
+		 */
+		usleep_range(2000, 2500);
+
+		mv88e6185_g1_reset(chip);
+
+		for (i = 0; i < mv88e6xxx_num_ports(chip); i++) {
+			/* Re-enable the configured copper ports */
+			err =  mv88e6xxx_port_write(chip,
+						    i,
+						    PORT_CONTROL,
+						    orig_port_state[i]);
+			if (err)
+				return err;
+		}
+	}
 
 	/* Setup Switch Port Registers */
 	for (i = 0; i < mv88e6xxx_num_ports(chip); i++) {
