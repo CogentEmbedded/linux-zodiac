@@ -1,0 +1,21 @@
+#
+# ZII_MX6_PLATFORM_INFO
+#
+
+menuconfig ZII_MX6_PLATFORM_INFO
+	tristate "Zodiac Inflight Innovation MX6 Platform Info"
+	depends on PROC_FS
+	default n
+	help
+	  This option enables support for Zodiac Inflight Innovation MX6 Platform Info.
+
+	  If you are not sure, say N here.
+
+menuconfig ZII_VF6XX_PLATFORM_INFO
+	tristate "Zodiac Inflight Innovation VF6XX Platform Info"
+	depends on PROC_FS
+	default n
+	help
+	  This option enables support for Zodiac Inflight Innovation VF6XX Platform Info.
+
+	  If you are not sure, say N here.
