@@ -771,6 +771,11 @@ config PANEL_BOOT_MESSAGE
 
 endif # PANEL
 
+config SCU_PIC
+	bool "SCU pic driver"
+	help
+	  This is the SCU pic driver
+
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/cb710/Kconfig"
