@@ -238,6 +238,8 @@ config FSL_MX25_ADC
 
 config HI8435
 	tristate "Holt Integrated Circuits HI-8435 threshold detector"
+	select IIO_BUFFER
+	select IIO_TRIGGERED_BUFFER
 	select IIO_TRIGGERED_EVENT
 	depends on SPI
 	help

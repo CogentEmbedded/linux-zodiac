@@ -11,12 +11,14 @@
  */
 
 #include <linux/delay.h>
+#include <linux/iio/buffer.h>
 #include <linux/iio/events.h>
 #include <linux/iio/iio.h>
 #include <linux/iio/sysfs.h>
 #include <linux/iio/trigger.h>
 #include <linux/iio/trigger_consumer.h>
 #include <linux/iio/triggered_event.h>
+#include <linux/iio/triggered_buffer.h>
 #include <linux/interrupt.h>
 #include <linux/module.h>
 #include <linux/of.h>
@@ -55,6 +57,7 @@ struct hi8435_priv {
 
 	unsigned threshold_lo[2]; /* GND-Open and Supply-Open thresholds */
 	unsigned threshold_hi[2]; /* GND-Open and Supply-Open thresholds */
+	void *iio_buffer;
 	u8 reg_buffer[3] ____cacheline_aligned;
 };
 
@@ -103,6 +106,85 @@ static int hi8435_writew(struct hi8435_priv *priv, u8 reg, u16 val)
 	priv->reg_buffer[2] = val & 0xff;
 
 	return spi_write(priv->spi, priv->reg_buffer, 3);
+}
+
+static ssize_t hi8435_test_enable_show(struct device *dev,
+				       struct device_attribute *attr, char *buf)
+{
+	struct hi8435_priv *priv = iio_priv(dev_to_iio_dev(dev));
+	int ret;
+	u8 reg;
+
+	ret = hi8435_readb(priv, HI8435_CTRL_REG, &reg);
+	if (ret < 0)
+		return ret;
+
+	return sprintf(buf, "%d\n", reg & HI8435_CTRL_TEST);
+}
+
+static ssize_t hi8435_test_enable_store(struct device *dev,
+					struct device_attribute *attr,
+					const char *buf, size_t len)
+{
+	struct hi8435_priv *priv = iio_priv(dev_to_iio_dev(dev));
+	unsigned int val;
+	int ret;
+
+	ret = kstrtouint(buf, 10, &val);
+	if (ret)
+		return ret;
+
+	ret = hi8435_writeb(priv, HI8435_CTRL_REG, val ? HI8435_CTRL_TEST : 0);
+	if (ret < 0)
+		return ret;
+
+	return len;
+}
+
+static IIO_DEVICE_ATTR(test_enable, S_IRUGO | S_IWUSR,
+	hi8435_test_enable_show, hi8435_test_enable_store, 0);
+
+static struct attribute *hi8435_attributes[] = {
+	&iio_dev_attr_test_enable.dev_attr.attr,
+	NULL,
+};
+
+static struct attribute_group hi8435_attribute_group = {
+	.attrs = hi8435_attributes,
+};
+
+static int hi8435_read_raw(struct iio_dev *idev,
+			   const struct iio_chan_spec *chan,
+			   int *val, int *val2, long mask)
+{
+	struct hi8435_priv *priv = iio_priv(idev);
+	int ret;
+
+	switch (mask) {
+	case IIO_CHAN_INFO_RAW:
+		ret = hi8435_readl(priv, HI8435_SO31_0_REG, val);
+		if (ret < 0)
+			return ret;
+		*val = !!(*val & BIT(chan->channel));
+		return IIO_VAL_INT;
+	default:
+		return -EINVAL;
+	}
+}
+
+static int hi8435_write_raw(struct iio_dev *idev,
+			    const struct iio_chan_spec *chan,
+			    int val, int val2, long mask)
+{
+	struct hi8435_priv *priv = iio_priv(idev);
+
+	switch (mask) {
+	case IIO_CHAN_INFO_RAW:
+		/* program sensors outputs in test mode */
+		return hi8435_writeb(priv, HI8435_TMDATA_REG, val ? 0x1 : 0x2);
+	default:
+		return -EINVAL;
+	}
 }
 
 static int hi8435_read_event_config(struct iio_dev *idev,
@@ -333,9 +415,16 @@ static const struct iio_chan_spec_ext_info hi8435_ext_info[] = {
 	.type = IIO_VOLTAGE,				\
 	.indexed = 1,					\
 	.channel = num,					\
+	.info_mask_separate = BIT(IIO_CHAN_INFO_RAW),	\
 	.event_spec = hi8435_events,			\
 	.num_event_specs = ARRAY_SIZE(hi8435_events),	\
 	.ext_info = hi8435_ext_info,			\
+	.scan_index = num,				\
+	.scan_type = {					\
+		.sign = 'u',				\
+		.realbits = 1,				\
+		.storagebits = 8,			\
+	},						\
 }
 
 static const struct iio_chan_spec hi8435_channels[] = {
@@ -376,6 +465,9 @@ static const struct iio_chan_spec hi8435_channels[] = {
 
 static const struct iio_info hi8435_info = {
 	.driver_module = THIS_MODULE,
+	.attrs = &hi8435_attribute_group,
+	.read_raw = hi8435_read_raw,
+	.write_raw = hi8435_write_raw,
 	.read_event_config = &hi8435_read_event_config,
 	.write_event_config = hi8435_write_event_config,
 	.read_event_value = &hi8435_read_event_value,
@@ -407,7 +499,7 @@ static void hi8435_iio_push_event(struct iio_dev *idev, unsigned int val)
 	priv->event_prev_val = val;
 }
 
-static irqreturn_t hi8435_trigger_handler(int irq, void *private)
+static irqreturn_t hi8435_event_trigger_handler(int irq, void *private)
 {
 	struct iio_poll_func *pf = private;
 	struct iio_dev *idev = pf->indio_dev;
@@ -426,6 +518,72 @@ err_read:
 
 	return IRQ_HANDLED;
 }
+
+static void hi8435_iio_push_to_buffers(struct iio_dev *idev, int val)
+{
+	struct hi8435_priv *priv = iio_priv(idev);
+	u8 *pbuffer = priv->iio_buffer;
+	int i;
+
+	for_each_set_bit(i, idev->active_scan_mask, idev->masklength) {
+		if (idev->channels[i].type == IIO_ALTVOLTAGE) {
+			*(u32 *)pbuffer = val;
+			pbuffer += 4;
+		} else {
+			*pbuffer = !!(val & BIT(i));
+			pbuffer++;
+		}
+	}
+	iio_push_to_buffers_with_timestamp(idev, priv->iio_buffer,
+					   iio_get_time_ns(idev));
+}
+
+static irqreturn_t hi8435_buffer_trigger_handler(int irq, void *private)
+{
+	struct iio_poll_func *pf = private;
+	struct iio_dev *idev = pf->indio_dev;
+	struct hi8435_priv *priv = iio_priv(idev);
+	int val, ret;
+
+	ret = hi8435_readl(priv, HI8435_SO31_0_REG, &val);
+	if (ret < 0)
+		goto err_read;
+
+	hi8435_iio_push_to_buffers(idev, val);
+
+err_read:
+	iio_trigger_notify_done(idev->trig);
+
+	return IRQ_HANDLED;
+}
+
+static int hi8435_buffer_postenable(struct iio_dev *idev)
+{
+	struct hi8435_priv *priv = iio_priv(idev);
+
+	priv->iio_buffer = kmalloc(idev->scan_bytes, GFP_KERNEL);
+	if (!priv->iio_buffer)
+		return -ENOMEM;
+
+	return iio_triggered_buffer_postenable(idev);
+}
+
+static int hi8435_buffer_predisable(struct iio_dev *idev)
+{
+	struct hi8435_priv *priv = iio_priv(idev);
+	int ret;
+
+	ret = iio_triggered_buffer_predisable(idev);
+	if (!ret)
+		kfree(priv->iio_buffer);
+
+	return ret;
+}
+
+static const struct iio_buffer_setup_ops hi8435_buffer_setup_ops = {
+	.postenable = &hi8435_buffer_postenable,
+	.predisable = &hi8435_buffer_predisable,
+};
 
 static int hi8435_probe(struct spi_device *spi)
 {
@@ -448,7 +606,7 @@ static int hi8435_probe(struct spi_device *spi)
 		hi8435_writeb(priv, HI8435_CTRL_REG, 0);
 	} else {
 		udelay(5);
-		gpiod_set_value(reset_gpio, 1);
+		gpiod_set_value_cansleep(reset_gpio, 1);
 	}
 
 	spi_set_drvdata(spi, idev);
@@ -480,18 +638,25 @@ static int hi8435_probe(struct spi_device *spi)
 	hi8435_writew(priv, HI8435_GOCENHYS_REG, 0x206);
 	hi8435_writew(priv, HI8435_SOCENHYS_REG, 0x206);
 
-	ret = iio_triggered_event_setup(idev, NULL, hi8435_trigger_handler);
+	ret = iio_triggered_event_setup(idev, NULL, hi8435_event_trigger_handler);
 	if (ret)
 		return ret;
+
+	ret = iio_triggered_buffer_setup(idev, NULL, hi8435_buffer_trigger_handler,
+					 &hi8435_buffer_setup_ops);
+	if (ret)
+		goto unregister_triggered_event;
 
 	ret = iio_device_register(idev);
 	if (ret < 0) {
 		dev_err(&spi->dev, "unable to register device\n");
-		goto unregister_triggered_event;
+		goto unregister_triggered_buffer;
 	}
 
 	return 0;
 
+unregister_triggered_buffer:
+	iio_triggered_buffer_cleanup(idev);
 unregister_triggered_event:
 	iio_triggered_event_cleanup(idev);
 	return ret;
@@ -502,6 +667,7 @@ static int hi8435_remove(struct spi_device *spi)
 	struct iio_dev *idev = spi_get_drvdata(spi);
 
 	iio_device_unregister(idev);
+	iio_triggered_buffer_cleanup(idev);
 	iio_triggered_event_cleanup(idev);
 
 	return 0;
