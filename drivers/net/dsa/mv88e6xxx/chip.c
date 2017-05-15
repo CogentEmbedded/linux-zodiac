@@ -670,6 +670,13 @@ static int mv88e6xxx_port_setup_mac(struct mv88e6xxx_chip *chip, int port,
 {
 	int err;
 
+	/* XXX hack for SCU4: force sw3/p9 and sw2/p10 to 2.5Gbps */
+	if ((chip->ds->index == 3 && port == 9) ||
+	    (chip->ds->index == 2 && port == 10)) {
+		mode = PHY_INTERFACE_MODE_2500BASEX;
+		speed = 2500;
+	}
+
 	if (!chip->info->ops->port_set_link)
 		return 0;
 
