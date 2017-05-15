@@ -1009,9 +1009,10 @@ static int lpuart_config_rs485(struct uart_port *port,
 		 * Note: UART is assumed to be active high.
 		 */
 		if (rs485->flags & SER_RS485_RTS_ON_SEND)
-			modem &= ~UARTMODEM_TXRTSPOL;
-		else if (rs485->flags & SER_RS485_RTS_AFTER_SEND)
+			/* MAXIM 485 Tranceiver TX RTS active high */
 			modem |= UARTMODEM_TXRTSPOL;
+		else if (rs485->flags & SER_RS485_RTS_AFTER_SEND)
+			modem &= ~UARTMODEM_TXRTSPOL;
 	}
 
 	/* Store the new configuration */
@@ -2037,7 +2038,8 @@ static int lpuart_probe(struct platform_device *pdev)
 	if (of_property_read_bool(np, "linux,rs485-enabled-at-boot-time")) {
 		sport->port.rs485.flags |= SER_RS485_ENABLED;
 		sport->port.rs485.flags |= SER_RS485_RTS_ON_SEND;
-		writeb(UARTMODEM_TXRTSE, sport->port.membase + UARTMODEM);
+		/* MAXIM 485 Transceiver needs TX RTS active High */
+		writeb(UARTMODEM_TXRTSE|UARTMODEM_TXRTSPOL, sport->port.membase + UARTMODEM);
 	}
 
 	return 0;
