@@ -1,0 +1,412 @@
+/*
+ * Copyright (C) 2015, 2016 Zodiac Inflight Innovations
+ *
+ * Based on an original 'vf610-twr.dts' which is Copyright 2015,
+ * Freescale Semiconductor, Inc.
+ *
+ * This file is dual-licensed: you can use it either under the terms
+ * of the GPL or the X11 license, at your option. Note that this dual
+ * licensing only applies to this file, and not this project as a
+ * whole.
+ *
+ *  a) This file is free software; you can redistribute it and/or
+ *     modify it under the terms of the GNU General Public License
+ *     version 2 as published by the Free Software Foundation.
+ *
+ *     This file is distributed in the hope that it will be useful
+ *     but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *     GNU General Public License for more details.
+ *
+ * Or, alternatively
+ *
+ *  b) Permission is hereby granted, free of charge, to any person
+ *     obtaining a copy of this software and associated documentation
+ *     files (the "Software"), to deal in the Software without
+ *     restriction, including without limitation the rights to use
+ *     copy, modify, merge, publish, distribute, sublicense, and/or
+ *     sell copies of the Software, and to permit persons to whom the
+ *     Software is furnished to do so, subject to the following
+ *     conditions:
+ *
+ *     The above copyright notice and this permission notice shall be
+ *     included in all copies or substantial portions of the Software.
+ *
+ *     THE SOFTWARE IS PROVIDED , WITHOUT WARRANTY OF ANY KIND
+ *     EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+ *     OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ *     NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+ *     HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY
+ *     WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ *     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+ *     OTHER DEALINGS IN THE SOFTWARE.
+ */
+
+/dts-v1/;
+#include "vf610.dtsi"
+
+/ {
+	model = "ZII VF610 CFU1 Switch Management Board, Rev A";
+	compatible = "zii,vf610dev-b", "zii,vf610dev", "fsl,vf610";
+
+	chosen {
+		stdout-path = &uart0;
+	};
+
+	memory {
+		reg = <0x80000000 0x20000000>;
+	};
+
+	gpio-leds {
+                compatible = "gpio-leds";
+                pinctrl-0 = <&pinctrl_leds_debug>;
+                pinctrl-names = "default";
+
+                debug {
+                        label = "zii:green:debug1";
+                        gpios = <&gpio2 18 GPIO_ACTIVE_HIGH>;
+                        linux,default-trigger = "heartbeat";
+			max-brightness = <1>;
+		};
+
+		fail {
+			label = "zii_fail";
+			gpios = <&gpio3 12 GPIO_ACTIVE_LOW>;
+			default-state = "off";
+			max-brightness = <1>;
+		};
+
+		status {
+			label = "zii_status";
+			gpios = <&gpio3 13 GPIO_ACTIVE_HIGH>;
+			default-state = "off";
+			max-brightness = <1>;
+		};
+
+		status_a {
+			label = "zii_status_a";
+			gpios = <&gpio3 14 GPIO_ACTIVE_HIGH>;
+			default-state = "off";
+			max-brightness = <1>;
+		};
+
+		status_b {
+			label = "zii_status_b";
+			gpios = <&gpio3 15 GPIO_ACTIVE_HIGH>;
+			default-state = "off";
+			max-brightness = <1>;
+		};
+	};
+
+	zii_vf6xx_plat {
+		compatible = "zii,zii_vf6xx_platform";
+		platform_id-gpios = <&gpio2 11 GPIO_ACTIVE_HIGH
+                         	&gpio2 12 GPIO_ACTIVE_HIGH
+                         	&gpio2 13 GPIO_ACTIVE_HIGH
+                         	&gpio2 14 GPIO_ACTIVE_HIGH>;
+	};
+
+	reg_vcc_3v3_mcu: regulator-vcc-3v3-mcu {
+		 compatible = "regulator-fixed";
+		 regulator-name = "vcc_3v3_mcu";
+		 regulator-min-microvolt = <3300000>;
+		 regulator-max-microvolt = <3300000>;
+	};
+};
+
+&adc0 {
+	vref-supply = <&reg_vcc_3v3_mcu>;
+	status = "okay";
+};
+
+&adc1 {
+	vref-supply = <&reg_vcc_3v3_mcu>;
+	status = "okay";
+};
+
+&dspi1 {
+	bus-num = <1>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_dspi1>;
+	status = "okay";
+
+	m25p128@0 {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		compatible = "m25p128", "jedec,spi-nor";
+		reg = <0>;
+		spi-max-frequency = <50000000>;
+
+		partition@0 {
+			label = "m25p128-0";
+			reg = <0x0 0x01000000>;
+		};
+	};
+};
+
+&edma0 {
+	status = "okay";
+};
+
+&esdhc0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_esdhc0>;
+	bus-width = <8>;
+	non-removable;
+	no-1-8-v;
+	keep-power-in-suspend;
+	status = "okay";
+};
+
+&esdhc1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_esdhc1>;
+	bus-width = <4>;
+	status = "okay";
+};
+
+&fec1 {
+	phy-mode = "rmii";
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_fec1>;
+	status = "okay";
+
+	fixed-link {
+		   speed = <100>;
+		   full-duplex;
+	};
+
+	mdio1: mdio {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		status = "okay";
+
+		switch0: switch0@0 {
+			compatible = "marvell,mv88e6085";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0>;
+			eeprom-length = <512>;
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+				port@0 {
+					reg = <0>;
+					label = "eth_cu_1000_1";
+				};
+				port@1 {
+					reg = <1>;
+					label = "eth_cu_1000_2";
+				};
+
+				port@2 {
+					reg = <2>;
+					label = "eth_cu_1000_3";
+				};
+
+				port@5 {
+					reg = <5>;
+					label = "eth_fc_1000_1";
+					pinctrl-names = "default";
+					pinctrl-0 = <&pinctrl_optical>;
+					fixed-link {
+						speed = <1000>;
+						full-duplex;
+						link-gpios = <&gpio4 4 
+						      GPIO_ACTIVE_HIGH>;
+					};
+				};
+
+				port@6 {
+					reg = <6>;
+					label = "cpu";
+					ethernet = <&fec1>;
+					fixed-link {
+						speed = <100>;
+						full-duplex;
+					};
+				};
+			};
+		};
+	};
+};
+
+&i2c0 {
+	clock-frequency = <400000>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_i2c0>;
+	status = "okay";
+
+	pca9554@22 {
+		compatible = "nxp,pca9554";
+		reg = <0x22>;
+		gpio-controller;
+		#gpio-cells = <2>;
+	};
+
+	lm75@48 {
+		compatible = "national,lm75";
+		reg = <0x48>;
+	};
+
+	nameplate: at24c04@54 {
+		compatible = "atmel,24c04";
+		#address-cells=<1>;
+		#size-cells=<1>;
+		reg = <0x54>;
+		label = "nameplate";
+	};
+
+	nvm: at24c04@52 {
+		compatible = "atmel,24c04";
+		reg = <0x52>;
+		label = "nvm";
+		#address-cells=<1>;
+		#size-cells=<1>;
+	};
+};
+
+&i2c1 {
+	clock-frequency = <100000>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_i2c1>;
+	status = "okay";
+};
+
+&uart0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_uart0>;
+	status = "okay";
+
+	/* ZII_INTERNAL: Disable UART DMA as it causes corruption */
+	dmas = <>;
+	dma-names = "";
+};
+
+
+&iomuxc {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_hog>;
+
+	vf610-zii-cfu1 {
+		pinctrl_hog: hoggrp {
+			fsl,pins = <
+				/* System Type */
+				VF610_PAD_PTD16__GPIO_78	0x2061 /*SYS_TYPE_3*/
+				VF610_PAD_PTD17__GPIO_77	0x2061 /*SYS_TYPE_2*/
+				VF610_PAD_PTD18__GPIO_76	0x2061 /*SYS_TYPE_1*/
+				VF610_PAD_PTD19__GPIO_75	0x2061 /*SYS_TYPE_0*/
+			>;
+		};
+
+		pinctrl_dspi1: dspi1grp {
+			fsl,pins = <
+				VF610_PAD_PTD5__DSPI1_CS0	0x1182
+				VF610_PAD_PTC6__DSPI1_SIN	0x1181
+				VF610_PAD_PTC7__DSPI1_SOUT	0x1182
+				VF610_PAD_PTC8__DSPI1_SCK	0x1182
+			>;
+		};
+
+		pinctrl_esdhc0: esdhc0grp {
+			fsl,pins = <
+				VF610_PAD_PTC0__ESDHC0_CLK	0x31ef
+				VF610_PAD_PTC1__ESDHC0_CMD	0x31ef
+				VF610_PAD_PTC2__ESDHC0_DAT0	0x31ef
+				VF610_PAD_PTC3__ESDHC0_DAT1	0x31ef
+				VF610_PAD_PTC4__ESDHC0_DAT2	0x31ef
+				VF610_PAD_PTC5__ESDHC0_DAT3	0x31ef
+				VF610_PAD_PTD23__ESDHC0_DAT4	0x31ef
+				VF610_PAD_PTD22__ESDHC0_DAT5	0x31ef
+				VF610_PAD_PTD21__ESDHC0_DAT6	0x31ef
+				VF610_PAD_PTD20__ESDHC0_DAT7	0x31ef
+			>;
+		};
+
+		pinctrl_esdhc1: esdhc1grp {
+			fsl,pins = <
+				VF610_PAD_PTA24__ESDHC1_CLK	0x31ef
+				VF610_PAD_PTA25__ESDHC1_CMD	0x31ef
+				VF610_PAD_PTA26__ESDHC1_DAT0	0x31ef
+				VF610_PAD_PTA27__ESDHC1_DAT1	0x31ef
+				VF610_PAD_PTA28__ESDHC1_DATA2	0x31ef
+				VF610_PAD_PTA29__ESDHC1_DAT3	0x31ef
+			>;
+		};
+
+		pinctrl_fec1: fec1grp {
+			fsl,pins = <
+				VF610_PAD_PTA6__RMII_CLKIN		0x30d1
+				VF610_PAD_PTC9__ENET_RMII1_MDC		0x30fe
+				VF610_PAD_PTC10__ENET_RMII1_MDIO	0x30d3
+				VF610_PAD_PTC11__ENET_RMII1_CRS		0x30d1
+				VF610_PAD_PTC12__ENET_RMII1_RXD1	0x30d1
+				VF610_PAD_PTC13__ENET_RMII1_RXD0	0x30d1
+				VF610_PAD_PTC14__ENET_RMII1_RXER	0x30d1
+				VF610_PAD_PTC15__ENET_RMII1_TXD1	0x30d2
+				VF610_PAD_PTC16__ENET_RMII1_TXD0	0x30d2
+				VF610_PAD_PTC17__ENET_RMII1_TXEN	0x30d2
+			>;
+		};
+
+		pinctrl_i2c0: i2c0grp {
+			fsl,pins = <
+				VF610_PAD_PTB14__I2C0_SCL		0x37ff
+				VF610_PAD_PTB15__I2C0_SDA		0x37ff
+			>;
+		};
+
+		pinctrl_i2c1: i2c1grp {
+			fsl,pins = <
+				VF610_PAD_PTB16__I2C1_SCL		0x37ff
+				VF610_PAD_PTB17__I2C1_SDA		0x37ff
+			>;
+		};
+
+		pinctrl_leds_debug: pinctrl-leds-debug {
+			fsl,pins = <
+				VF610_PAD_PTD3__GPIO_82			0x31c2
+				VF610_PAD_PTE3__GPIO_108		0x31c2
+				VF610_PAD_PTE4__GPIO_109		0x31c2
+				VF610_PAD_PTE5__GPIO_110		0x31c2
+				VF610_PAD_PTE6__GPIO_111		0x31c2
+			   >;
+		};
+
+		pinctrl_uart0: uart0grp {
+			fsl,pins = <
+				VF610_PAD_PTB10__UART0_TX		0x21a2
+				VF610_PAD_PTB11__UART0_RX		0x21a1
+			>;
+		};
+
+		pinctrl_optical: optical-grp {
+			fsl,pins = <
+				/* ZII_INTERNAL:
+				 * PTE27 is wired to signal SD on part CONN
+				 * SFF-F4 via net FIM_DS. An active high
+				 * on this indicates a received optical
+				 * signal
+
+				 * SPEED=0b11 HIGH, SRE=0b0, ODE=0b0, HYS=0b0
+				 * DSE=0b001 150Ohm, PUS=0b10 100k UP
+				 * PKE=0b0, PUE=0b0, OBE=0b0, IBE=0b1
+				 */
+				 VF610_PAD_PTE27__GPIO_132       0x3061
+
+				 /* ZII_INTERNAL
+				 * PTE13 is wired to signal T_DIS on part CONN
+				 * SFF-F4 via net FIM_TDIS. Setting this high
+				 * will disable optical output from the SFF-F4
+
+				 * SPEED=0b11 HIGH, SRE=0b0, ODE=0b0, HYS=0b0
+				 * DSE=0b001 150Ohm, PUS=0b00 100k DOWN
+				 * PKE=0b0, PUE=0b0, OBE=0b1, IBE=0b1
+				 * TODO: probably want IBE=0b0
+				 */
+				 VF610_PAD_PTE13__GPIO_118       0x3043
+			>;
+		};
+	};
+};
