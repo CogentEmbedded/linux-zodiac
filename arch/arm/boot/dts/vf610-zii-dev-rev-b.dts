@@ -363,6 +363,9 @@
 		reg = <0x20>;
 		gpio-controller;
 		#gpio-cells = <2>;
+		gpio-line-names = "ENET_SWR_EN", "ESW1_RESETn", "ARINC_RESET",
+			"DD1_IO_RESETn", "ESW2_RESETn", "ESW2_RESETn",
+			"ESW2_RESETn", "";
 
 	};
 

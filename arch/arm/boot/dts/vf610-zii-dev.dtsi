@@ -83,6 +83,93 @@
 		regulator-boot-on;
 		gpio = <&gpio0 6 0>;
 	};
+
+	assembly_rev {
+		compatible = "gpio-of-helper";
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_gpio_assembly_rev>;
+		status = "okay";
+
+		ASSEMBLY_R2 {
+			gpio-name = "ASSEMBLY_R2";
+			gpio = <&gpio2 31 GPIO_ACTIVE_HIGH>;
+			input;
+		};
+
+		ASSEMBLY_R1 {
+			gpio-name = "ASSEMBLY_R1";
+			gpio = <&gpio1 3 GPIO_ACTIVE_HIGH>;
+			input;
+		};
+
+		ASSEMBLY_R0 {
+			gpio-name = "ASSEMBLY_R0";
+			gpio = <&gpio1 2 GPIO_ACTIVE_HIGH>;
+			input;
+		};
+	};
+
+	copper_rev {
+		compatible = "gpio-of-helper";
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_gpio_copper_rev>;
+		status = "okay";
+
+		CU_REV3 {
+			gpio-name = "CU_REV3";
+			gpio = <&gpio3 30 GPIO_ACTIVE_HIGH>;
+			input;
+		};
+
+		CU_REV2 {
+			gpio-name = "CU_REV2";
+			gpio = <&gpio2 28 GPIO_ACTIVE_HIGH>;
+			input;
+		};
+
+		CU_REV1 {
+			gpio-name = "CU_REV1";
+			gpio = <&gpio0 21 GPIO_ACTIVE_HIGH>;
+			input;
+		};
+
+		CU_REV0 {
+			gpio-name = "CU_REV0";
+			gpio = <&gpio0 20 GPIO_ACTIVE_HIGH>;
+			input;
+		};
+	};
+
+	sys_type {
+		compatible = "gpio-of-helper";
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_gpio_sys_type>;
+		status = "okay";
+
+		SYS_TYPE_3 {
+			gpio-name = "SYS_TYPE_3";
+			gpio = <&gpio2 14 GPIO_ACTIVE_HIGH>;
+			input;
+		};
+
+		SYS_TYPE_2 {
+			gpio-name = "SYS_TYPE_2";
+			gpio = <&gpio2 13 GPIO_ACTIVE_HIGH>;
+			input;
+		};
+
+		SYS_TYPE_1 {
+			gpio-name = "SYS_TYPE_1";
+			gpio = <&gpio2 12 GPIO_ACTIVE_HIGH>;
+			input;
+		};
+
+		SYS_TYPE_0 {
+			gpio-name = "SYS_TYPE_0";
+			gpio = <&gpio2 11 GPIO_ACTIVE_HIGH>;
+			input;
+		};
+	};
 };
 
 &adc0 {
@@ -372,6 +459,32 @@
 	pinctrl_usb_vbus: pinctrl-usb-vbus {
 		fsl,pins = <
 			VF610_PAD_PTA16__GPIO_6	0x31c2
+		>;
+	};
+
+	pinctrl_gpio_assembly_rev: pinctrl-gpio-assembly-rev {
+		fsl,pins = <
+			VF610_PAD_PTB25__GPIO_95	0x33e1
+			VF610_PAD_PTB13__GPIO_35	0x33e1
+			VF610_PAD_PTB12__GPIO_34	0x33e1
+		>;
+	};
+
+	pinctrl_gpio_copper_rev: pinctrl-gpio-copper-rev {
+		fsl,pins = <
+			VF610_PAD_PTE21__GPIO_126	0x33e1
+			VF610_PAD_PTD13__GPIO_92	0x33e1
+			VF610_PAD_PTA31__GPIO_21	0x33e1
+			VF610_PAD_PTA30__GPIO_20	0x33e1
+		>;
+	};
+
+	pinctrl_gpio_sys_type: pinctrl-gpio-sys-type {
+		fsl,pins = <
+			VF610_PAD_PTD16__GPIO_78	0x33e1
+			VF610_PAD_PTD17__GPIO_77	0x33e1
+			VF610_PAD_PTD18__GPIO_76	0x33e1
+			VF610_PAD_PTD19__GPIO_75	0x33e1
 		>;
 	};
 
