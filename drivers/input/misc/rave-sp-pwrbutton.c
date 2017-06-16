@@ -24,7 +24,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
-#include <linux/rave-spg.h>
+#include <linux/rave-sp.h>
 
 #define EVT_BUTTON_PRESS	0xE0
 
@@ -42,13 +42,13 @@ to_zii_pic_power_button(struct notifier_block *nb)
 static int zii_pic_power_button_event(struct notifier_block *nb,
 				      unsigned long action, void *data)
 {
-	if (zii_pic_action_get_event(action) == EVT_BUTTON_PRESS) {
+	if (rave_sp_action_unpack_event(action) == EVT_BUTTON_PRESS) {
 		struct zii_pic_power_button *picpb;
 
 		picpb = to_zii_pic_power_button(nb);
 
 		input_report_key(picpb->idev, KEY_POWER,
-				 zii_pic_action_get_value(action));
+				 rave_sp_action_unpack_value(action));
 		input_sync(picpb->idev);
 
 		return NOTIFY_STOP;
@@ -93,7 +93,7 @@ static int zii_pic_pwrbutton_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
-	return devm_zii_pic_register_event_notifier(dev, &picpb->nb);
+	return devm_rave_sp_register_event_notifier(dev, &picpb->nb);
 }
 
 static struct platform_driver zii_pic_pwrbutton_driver = {
