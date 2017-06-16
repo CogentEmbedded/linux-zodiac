@@ -24,7 +24,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
-#include <linux/rave-spg.h>
+#include <linux/rave-sp.h>
 
 #define EVT_BUTTON_PRESS	0xE0
 
@@ -93,7 +93,7 @@ static int zii_pic_pwrbutton_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
-	return devm_zii_pic_register_event_notifier(dev, &picpb->nb);
+	return devm_rave_sp_register_event_notifier(dev, &picpb->nb);
 }
 
 static struct platform_driver zii_pic_pwrbutton_driver = {
