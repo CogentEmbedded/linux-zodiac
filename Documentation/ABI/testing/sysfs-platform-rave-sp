@@ -1,0 +1,35 @@
+What:		/sys/devices/platform/*/serial*/serial*-*/reset_reason
+Date:		Aug 2017
+Contact:	"Andrey Smirnov" <andrew.smirnov@gmail.com>
+Description:    (RO) Indicates reason for last reset.
+
+		The following values can be reported:
+		    * 0  -> Normal Power Off
+		    * 1  -> Hardware Watchdog
+		    * 2  -> Software Watchdog
+		    * 3  -> Input Voltage Out Of Range
+		    * 4  -> Host Requested
+		    * 5  -> Temperature Out Of Range
+		    * 6  -> User Requested (via long Power Button press)
+		    * 7  -> Illegal Configuration Word
+		    * 8  -> Illegal Insturction
+		    * 9  -> Illegal Trap
+		    * 10 -> Unknown
+		    * 11 -> Crew Panel Requested
+
+		 NOTE: Codes 7,8 and 9 pertain to exceptions happening
+		 in supervisory processor/its firmware and not host
+		 CPU.
+
+What:		/sys/devices/platform/*/serial*/serial*-*/boot_source
+Date:		Aug 2017
+Contact:	"Andrey Smirnov" <andrew.smirnov@gmail.com>
+Description:    (RW) Indicates currently selected boot source.
+
+		The following values are valid:
+		    * 0  -> SD card
+		    * 1  -> eMMC
+		    * 2  -> SPI NOR
+
+		NOTE: Setting boot source on RDU1 hardware is
+		currently not implemented

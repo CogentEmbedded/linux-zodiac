@@ -21,9 +21,9 @@
 #include <linux/atomic.h>
 #include <linux/crc-ccitt.h>
 #include <linux/delay.h>
+#include <linux/debugfs.h>
 #include <linux/export.h>
 #include <linux/init.h>
-#include <linux/slab.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/of.h>
@@ -139,10 +139,13 @@ struct rave_sp_checksum {
  * struct rave_sp_variant_cmds - Variant specific command routines
  *
  * @translate:	     Generic to variant specific command mapping routine
- *
+ * @get_boot_source: Pointer to "get boot source" implementation
+ * @set_boot_source: Pointer to "set boot source" implementation
  */
 struct rave_sp_variant_cmds {
 	int (*translate)(enum rave_sp_command);
+	int (*get_boot_source)(struct rave_sp *);
+	int (*set_boot_source)(struct rave_sp *, u8);
 };
 
 /**
@@ -150,11 +153,13 @@ struct rave_sp_variant_cmds {
  *
  * @checksum:	Variant specific checksum implementation
  * @cmd:	Variant specific command pointer table
- *
+ * @init:	Variant specific initialization sequence implementation
+ * @group:	Attribute group for exposed sysfs entries
  */
 struct rave_sp_variant {
 	const struct rave_sp_checksum *checksum;
 	struct rave_sp_variant_cmds cmd;
+	void (*init)(struct rave_sp *);
 };
 
 /**
@@ -167,8 +172,24 @@ struct rave_sp_variant {
  * @reply_lock:			Lock protecting @reply
  * @reply:			Pointer to memory to store reply payload
  *
+ * @part_number_firmware:	Firmware version
+ * @part_number_bootloader:	Bootloader version
+ * @reset_reason:		Reset reason
+ * @copper_rev_rmb:		Manufacturing version info
+ * @copper_rev_deb:		Manufacturing version info
+ * @silicon_devid:		MCU silicon version info
+ * @silicon_devrev:		MCU silicon version info
+ * @copper_mod_rmb:		Manufacturing version info
+ * @copper_mod_deb:		Manufacturing version info
+ *
  * @variant:			Device variant specific information
  * @event_notifier_list:	Input event notification chain
+ * @group:			Attrubute group for exposed sysfs entries
+ *
+ *
+ * part_number_*, reset_reason, copper_*, and silicon_* fields are all
+ * strings retrived from the device during device probing and made
+ * available for later userspace consumption via sysfs
  *
  */
 struct rave_sp {
@@ -181,9 +202,24 @@ struct rave_sp {
 	struct mutex reply_lock;
 	struct rave_sp_reply *reply;
 
+	const char *part_number_firmware;
+	const char *part_number_bootloader;
+
+	const char *reset_reason;
+	const char *copper_rev_rmb;
+	const char *copper_rev_deb;
+	const char *silicon_devid;
+	const char *silicon_devrev;
+
+	const char *copper_mod_rmb;
+	const char *copper_mod_deb;
+
 	const struct rave_sp_variant *variant;
 
 	struct blocking_notifier_head event_notifier_list;
+
+	struct attribute_group group;
+	struct dentry *debugfs;
 };
 
 struct rave_sp_rsp_status {
@@ -229,6 +265,279 @@ int devm_rave_sp_register_event_notifier(struct device *dev,
 	return ret;
 }
 EXPORT_SYMBOL_GPL(devm_rave_sp_register_event_notifier);
+
+static const char *devm_rave_sp_version(struct device *dev, const char *buf)
+{
+	/*
+	 * NOTE: The format string below uses %02d to display u16
+	 * intentionally for the sake of backwards compatibility with
+	 * legacy software.
+	 */
+	return devm_kasprintf(dev, GFP_KERNEL, "%02d%02d%02d.%c%c\n",
+			      buf[0], get_unaligned_le16(&buf[1]),
+			      buf[3], buf[4], buf[5]);
+}
+
+static int rave_sp_get_status(struct rave_sp *sp,
+			      struct rave_sp_rsp_status *status)
+{
+	u8 cmd[] = {
+		[0] = RAVE_SP_CMD_STATUS,
+		[1] = 0
+	};
+	return rave_sp_exec(sp, cmd, sizeof(cmd), status, sizeof(*status));
+}
+
+#define RAVE_SP_ATTR_RO_STRING(name)					\
+	static ssize_t							\
+	name##_show(struct device *dev,					\
+		    struct device_attribute *attr,			\
+		    char *buf)						\
+	{								\
+		struct rave_sp *sp = dev_get_drvdata(dev);		\
+		return sprintf(buf, "%s", sp->name);			\
+	}								\
+	static DEVICE_ATTR_RO(name)
+
+RAVE_SP_ATTR_RO_STRING(reset_reason);
+
+static int rave_sp_i2c_device_status_get(void *context, u64 *result)
+{
+	struct rave_sp *sp = context;
+	u8 status[2];
+	u8 cmd[] = {
+		[0] = RAVE_SP_CMD_GET_I2C_DEVICE_STATUS,
+		[1] = 0
+	};
+	int ret;
+
+	ret = rave_sp_exec(sp, cmd, sizeof(cmd), &status, sizeof(status));
+	if (ret < 0)
+		return ret;
+
+	*result = get_unaligned_le16(status);
+	return 0;
+}
+DEFINE_DEBUGFS_ATTRIBUTE(rave_sp_i2c_device_status,
+			 rave_sp_i2c_device_status_get,
+			 NULL, "%04llx\n");
+
+
+static int rave_sp_rdu1_get_boot_source(struct rave_sp *sp)
+{
+	struct rave_sp_rsp_status status;
+	int ret;
+
+	ret = rave_sp_get_status(sp, &status);
+
+	return (ret < 0) ? ret : (status.gs_format >> 2) & 0x03;
+}
+
+static int rave_sp_rdu1_set_boot_source(struct rave_sp *sp, u8 boot_source)
+{
+	return -ENOTSUPP;
+}
+
+static int rave_sp_common_set_boot_source(struct rave_sp *sp, u8 boot_source)
+{
+	u8 cmd[] = {
+		[0] = RAVE_SP_CMD_BOOT_SOURCE,
+		[1] = 0,
+		[2] = RAVE_SP_BOOT_SOURCE_SET,
+		[3] = boot_source,
+	};
+
+	return rave_sp_exec(sp, cmd, sizeof(cmd), NULL, 0);
+}
+
+static int rave_sp_common_get_boot_source(struct rave_sp *sp)
+{
+	u8 cmd[] = {
+		[0] = RAVE_SP_CMD_BOOT_SOURCE,
+		[1] = 0,
+		[2] = RAVE_SP_BOOT_SOURCE_GET,
+		[3] = 0,
+	};
+	u8 boot_source;
+	int ret;
+
+	ret = rave_sp_exec(sp, cmd, sizeof(cmd),
+			   &boot_source, sizeof(boot_source));
+
+	return (ret < 0) ? ret : boot_source;
+}
+
+static ssize_t boot_source_show(struct device *dev,
+				struct device_attribute *attr,
+				char *buf)
+{
+	struct rave_sp *sp = dev_get_drvdata(dev);
+	int ret;
+
+	ret = sp->variant->cmd.get_boot_source(sp);
+
+	return (ret < 0) ? ret : sprintf(buf, "%d\n", ret);
+}
+
+static ssize_t boot_source_store(struct device *dev,
+				 struct device_attribute *attr,
+				 const char *buf, size_t count)
+{
+	struct rave_sp *sp = dev_get_drvdata(dev);
+	u8 boot_source;
+	int ret;
+
+	ret = kstrtou8(buf, 0, &boot_source);
+	if (ret)
+		return ret;
+
+	if (boot_source != RAVE_SP_BOOT_SOURCE_SD &&
+	    boot_source != RAVE_SP_BOOT_SOURCE_EMMC &&
+	    boot_source != RAVE_SP_BOOT_SOURCE_NOR)
+		return -EINVAL;
+
+	ret = sp->variant->cmd.set_boot_source(sp, boot_source);
+
+	return (ret < 0) ? ret : count;
+}
+static DEVICE_ATTR_RW(boot_source);
+
+static void devm_rave_sp_sysfs_group_release(struct device *dev, void *res)
+{
+	struct rave_sp *sp = *(struct rave_sp **)res;
+	const struct attribute_group *group = &sp->group;
+	struct kobject *root = &sp->serdev->dev.kobj;
+
+	sysfs_remove_group(root, group);
+}
+
+static int devm_rave_sysfs_create_group(struct rave_sp *sp)
+{
+	struct rave_sp **rcsp;
+	struct device *dev = &sp->serdev->dev;
+	const struct attribute_group *group = &sp->group;
+	struct kobject *root = &dev->kobj;
+	int ret;
+
+	rcsp = devres_alloc(devm_rave_sp_sysfs_group_release,
+			     sizeof(*rcsp), GFP_KERNEL);
+	if (!rcsp)
+		return -ENOMEM;
+
+	ret = sysfs_create_group(root, group);
+	if (!ret) {
+		*rcsp = sp;
+		devres_add(dev, rcsp);
+	} else {
+		devres_free(rcsp);
+	}
+
+	return ret;
+}
+
+#define RAVE_SP_DEFINE_SEQ_FILE_PRINT_FUNCTION(attr_name)		\
+	static int rave_sp_print_##attr_name(struct seq_file *file,	\
+					     void *data)		\
+	{								\
+		struct rave_sp *sp = dev_get_drvdata(file->private);	\
+									\
+		seq_printf(file, sp->attr_name);			\
+		return 0;						\
+	}
+
+RAVE_SP_DEFINE_SEQ_FILE_PRINT_FUNCTION(part_number_firmware);
+RAVE_SP_DEFINE_SEQ_FILE_PRINT_FUNCTION(part_number_bootloader);
+RAVE_SP_DEFINE_SEQ_FILE_PRINT_FUNCTION(copper_rev_deb);
+RAVE_SP_DEFINE_SEQ_FILE_PRINT_FUNCTION(copper_rev_rmb);
+RAVE_SP_DEFINE_SEQ_FILE_PRINT_FUNCTION(copper_mod_deb);
+RAVE_SP_DEFINE_SEQ_FILE_PRINT_FUNCTION(copper_mod_rmb);
+RAVE_SP_DEFINE_SEQ_FILE_PRINT_FUNCTION(silicon_devid);
+RAVE_SP_DEFINE_SEQ_FILE_PRINT_FUNCTION(silicon_devrev);
+
+#define RAVE_SP_DEBUGFS_CREATE_DEVM_SEQFILE(sp, attr_name)		\
+	debugfs_create_devm_seqfile(&sp->serdev->dev, #attr_name,	\
+				    sp->debugfs,			\
+				    rave_sp_print_##attr_name)
+
+static int rave_sp_debugfs_create(struct rave_sp *sp)
+{
+	struct dentry *file;
+
+	sp->debugfs = debugfs_create_dir("rave", NULL);
+	if (!sp->debugfs)
+		return -ENOMEM;
+
+	file = debugfs_create_file("i2c_device_status", 0444,
+				   sp->debugfs, sp,
+				   &rave_sp_i2c_device_status);
+	if (!file)
+		goto error;
+
+	file = RAVE_SP_DEBUGFS_CREATE_DEVM_SEQFILE(sp, part_number_firmware);
+	if (!file)
+		goto error;
+
+	file = RAVE_SP_DEBUGFS_CREATE_DEVM_SEQFILE(sp, part_number_bootloader);
+	if (!file)
+		goto error;
+
+	file = RAVE_SP_DEBUGFS_CREATE_DEVM_SEQFILE(sp, copper_rev_deb);
+	if (!file)
+		goto error;
+
+	file = RAVE_SP_DEBUGFS_CREATE_DEVM_SEQFILE(sp, copper_rev_rmb);
+	if (!file)
+		goto error;
+
+	file = RAVE_SP_DEBUGFS_CREATE_DEVM_SEQFILE(sp, copper_mod_deb);
+	if (!file)
+		goto error;
+
+	file = RAVE_SP_DEBUGFS_CREATE_DEVM_SEQFILE(sp, copper_mod_rmb);
+	if (!file)
+		goto error;
+
+	file = RAVE_SP_DEBUGFS_CREATE_DEVM_SEQFILE(sp, silicon_devrev);
+	if (!file)
+		goto error;
+
+	file = RAVE_SP_DEBUGFS_CREATE_DEVM_SEQFILE(sp, silicon_devid);
+	if (!file)
+		goto error;
+
+	return 0;
+error:
+	debugfs_remove_recursive(sp->debugfs);
+	return -ENOMEM;
+}
+
+static void rave_sp_degugfs_release(struct device *dev, void *res)
+{
+	struct rave_sp *sp = *(struct rave_sp **)res;
+
+	debugfs_remove_recursive(sp->debugfs);
+}
+
+static int devm_rave_sp_debugfs_create(struct rave_sp *sp)
+{
+	struct rave_sp **rcsp;
+	struct device *dev = &sp->serdev->dev;
+	int ret;
+
+	rcsp = devres_alloc(rave_sp_degugfs_release, sizeof(*rcsp), GFP_KERNEL);
+	if (!rcsp)
+		return -ENOMEM;
+
+	ret = rave_sp_debugfs_create(sp);
+	if (!ret) {
+		*rcsp = sp;
+		devres_add(dev, rcsp);
+	} else {
+		devres_free(rcsp);
+	}
+
+	return ret;
+}
 
 static void csum_8b2c(const u8 *buf, size_t size, u8 *crc)
 {
@@ -568,6 +877,164 @@ static int rave_sp_default_cmd_translate(enum rave_sp_command command)
 	}
 }
 
+static void rave_sp_load_reset_reason(struct rave_sp *sp)
+{
+	struct device *dev = &sp->serdev->dev;
+	u8 cmd[] = {
+		[0] = RAVE_SP_CMD_RESET_REASON,
+		[1] = 0,
+	};
+	u8 reason;
+	int ret;
+
+	ret = rave_sp_exec(sp, cmd, sizeof(cmd), &reason, sizeof(reason));
+	if (ret) {
+		dev_err(dev, "CMD_RESET_REASON failed %d\n", ret);
+		return;
+	}
+
+	sp->reset_reason = devm_kasprintf(dev, GFP_KERNEL, "%02x\n", reason);
+}
+
+static const char *rave_sp_silicon_to_string(struct device *dev, u32 version)
+{
+	return devm_kasprintf(dev, GFP_KERNEL, "%08x\n", version);
+}
+
+static const char *rave_sp_copper_to_string(struct device *dev, uint8_t version)
+{
+	return devm_kasprintf(dev, GFP_KERNEL, "%02x\n", version);
+}
+
+static void rave_sp_load_silicon_rev(struct rave_sp *sp)
+{
+	struct device *dev = &sp->serdev->dev;
+	u8 cmd[] = {
+		[0] = RAVE_SP_CMD_GET_SP_SILICON_REV,
+		[1] = 0
+	};
+	struct {
+		__le32 devid;
+		__le32 devrev;
+	} __packed reply;
+	u32 devid;
+	u32 devrev;
+	int ret;
+
+	ret = rave_sp_exec(sp, cmd, sizeof(cmd), &reply, sizeof(reply));
+	if (ret) {
+		dev_err(dev, "CMD_GET_SP_SILICON_REV failed %d\n", ret);
+		return;
+	}
+
+	devid  = le32_to_cpu(reply.devid);
+	devrev = le32_to_cpu(reply.devrev);
+
+	sp->silicon_devid  = rave_sp_silicon_to_string(dev, devid);
+	sp->silicon_devrev = rave_sp_silicon_to_string(dev, devrev);
+}
+
+static void rave_sp_rdu1_init(struct rave_sp *sp)
+{
+	struct device *dev = &sp->serdev->dev;
+	u8 cmd[] = {
+		[0] = RAVE_SP_CMD_REQ_COPPER_REV,
+		[1] = 0
+	};
+	struct rave_sp_rsp_status status;
+	u8 revision[2];
+	int ret;
+
+	ret = rave_sp_get_status(sp, &status);
+	if (ret) {
+		dev_err(dev, "CMD_STATUS failed %d\n", ret);
+	} else {
+		sp->part_number_firmware =
+			devm_rave_sp_version(dev, status.fw_bytes);
+		sp->part_number_bootloader =
+			devm_rave_sp_version(dev, status.bl_bytes);
+	}
+
+	ret = rave_sp_exec(sp, cmd, sizeof(cmd), &revision, sizeof(revision));
+	if (ret) {
+		dev_err(dev, "CMD_REQ_COPPER_REV failed %d\n", ret);
+		return;
+	}
+
+	sp->copper_rev_rmb = rave_sp_copper_to_string(dev, revision[0]);
+	sp->copper_rev_deb = rave_sp_copper_to_string(dev, revision[1]);
+}
+
+static void rave_sp_common_init(struct rave_sp *sp)
+{
+	struct device *dev = &sp->serdev->dev;
+	u8 version[6];
+	u8 cmd[2];
+	int ret;
+
+	cmd[0] = RAVE_SP_CMD_GET_FIRMWARE_VERSION;
+	ret = rave_sp_exec(sp, cmd, sizeof(cmd), version, sizeof(version));
+	if (ret)
+		dev_warn(dev, "CMD_GET_FIRMWARE_VERSION failed %d\n", ret);
+	else
+		sp->part_number_firmware = devm_rave_sp_version(dev, version);
+
+	cmd[0] = RAVE_SP_CMD_GET_BOOTLOADER_VERSION;
+	ret = rave_sp_exec(sp, cmd, sizeof(cmd), version, sizeof(version));
+	if (ret) {
+		dev_warn(dev, "CMD_GET_BOOTLOADER_VERSION failed %d\n", ret);
+		return;
+	}
+
+	sp->part_number_bootloader = devm_rave_sp_version(dev, version);
+}
+
+static void rave_sp_rdu2_init(struct rave_sp *sp)
+{
+	struct device *dev = &sp->serdev->dev;
+	u8 cmd[] = {
+		[0] = RAVE_SP_CMD_REQ_COPPER_REV,
+		[1] = 0,
+		[2] = RAVE_SP_RDU2_BOARD_TYPE_RMB,
+	};
+	u8 copper_rev;
+	int ret;
+
+	rave_sp_common_init(sp);
+
+	ret = rave_sp_exec(sp, cmd, sizeof(cmd),
+			   &copper_rev, sizeof(copper_rev));
+	if (ret) {
+		dev_warn(dev,
+			 "RAVE_SP_CMD_REQ_COPPER_REV(RMB) failed %d\n", ret);
+	} else {
+		sp->copper_rev_rmb =
+			rave_sp_copper_to_string(dev, copper_rev & 0x1F);
+		sp->copper_mod_rmb =
+			rave_sp_copper_to_string(dev, copper_rev >> 5);
+	}
+
+	cmd[2] = RAVE_SP_RDU2_BOARD_TYPE_DEB;
+
+	ret = rave_sp_exec(sp, cmd, sizeof(cmd),
+			   &copper_rev, sizeof(copper_rev));
+	if (ret) {
+		dev_warn(dev,
+			 "RAVE_SP_CMD_REQ_COPPER_REV(DEB) failed %d\n", ret);
+		return;
+	}
+
+	sp->copper_rev_deb = rave_sp_copper_to_string(dev,
+						      copper_rev & 0x1F);
+	sp->copper_mod_deb = rave_sp_copper_to_string(dev,
+						      copper_rev >> 5);
+}
+
+static struct attribute *rave_sp_attrs[] = {
+	&dev_attr_boot_source.attr,
+	&dev_attr_reset_reason.attr,
+	NULL
+};
 
 static const struct rave_sp_checksum rave_sp_checksum_8b2c = {
 	.length     = 1,
@@ -583,21 +1050,30 @@ static const struct rave_sp_variant rave_sp_legacy = {
 	.checksum = &rave_sp_checksum_8b2c,
 	.cmd = {
 		.translate = rave_sp_default_cmd_translate,
+		.get_boot_source = rave_sp_common_get_boot_source,
+		.set_boot_source = rave_sp_common_set_boot_source,
 	},
+	.init = rave_sp_common_init,
 };
 
 static const struct rave_sp_variant rave_sp_rdu1 = {
 	.checksum = &rave_sp_checksum_8b2c,
 	.cmd = {
 		.translate = rave_sp_rdu1_cmd_translate,
+		.get_boot_source = rave_sp_rdu1_get_boot_source,
+		.set_boot_source = rave_sp_rdu1_set_boot_source,
 	},
+	.init = rave_sp_rdu1_init,
 };
 
 static const struct rave_sp_variant rave_sp_rdu2 = {
 	.checksum = &rave_sp_checksum_ccitt,
 	.cmd = {
 		.translate = rave_sp_rdu2_cmd_translate,
+		.get_boot_source = rave_sp_common_get_boot_source,
+		.set_boot_source = rave_sp_common_set_boot_source,
 	},
+	.init = rave_sp_rdu2_init,
 };
 
 static const struct of_device_id rave_sp_dt_ids[] = {
@@ -617,6 +1093,7 @@ static const struct serdev_device_ops rave_sp_serdev_device_ops = {
 static int rave_sp_probe(struct serdev_device *serdev)
 {
 	struct device *dev = &serdev->dev;
+	const char *unknown = "unknown\n";
 	struct rave_sp *sp;
 	u32 baud;
 	int ret;
@@ -638,6 +1115,8 @@ static int rave_sp_probe(struct serdev_device *serdev)
 	if (!sp->variant)
 		return -ENODEV;
 
+	sp->group.attrs = rave_sp_attrs;
+
 	mutex_init(&sp->bus_lock);
 	mutex_init(&sp->reply_lock);
 	BLOCKING_INIT_NOTIFIER_HEAD(&sp->event_notifier_list);
@@ -649,7 +1128,41 @@ static int rave_sp_probe(struct serdev_device *serdev)
 
 	serdev_device_set_baudrate(serdev, baud);
 
+	sp->silicon_devid		= unknown;
+	sp->silicon_devrev		= unknown;
+	sp->copper_rev_deb		= unknown;
+	sp->copper_rev_rmb		= unknown;
+	sp->copper_mod_deb		= unknown;
+	sp->copper_mod_rmb		= unknown;
+	sp->reset_reason		= unknown;
+	sp->part_number_firmware	= unknown;
+	sp->part_number_bootloader	= unknown;
+
+	sp->variant->init(sp);
+
+	/*
+	 * Those strings already have a \n embedded so no need to have
+	 * one in format string.
+	 */
+	dev_info(dev, "Firmware version: %s", sp->part_number_firmware);
+	dev_info(dev, "Bootloader version: %s", sp->part_number_bootloader);
+
+	rave_sp_load_reset_reason(sp);
+	rave_sp_load_silicon_rev(sp);
+
+	ret = devm_rave_sp_debugfs_create(sp);
+	if (ret)
+		goto close_serdev;
+
+	ret = devm_rave_sysfs_create_group(sp);
+	if (ret)
+		goto close_serdev;
+
 	return of_platform_default_populate(dev->of_node, NULL, dev);
+
+close_serdev:
+	serdev_device_close(serdev);
+	return ret;
 }
 
 static void rave_sp_remove(struct serdev_device *serdev)
