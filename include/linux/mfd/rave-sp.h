@@ -63,4 +63,38 @@ struct device;
 int devm_rave_sp_register_event_notifier(struct device *dev,
 					 struct notifier_block *nb);
 
+struct rave_sp_version {
+	u8     hardware;
+	__le16 major;
+	u8     minor;
+	u8     letter[2];
+} __packed;
+
+struct rave_sp_status {
+	struct rave_sp_version bootloader_version;
+	struct rave_sp_version firmware_version;
+	__le16 rdu_eeprom_flag;
+	__le16 dds_eeprom_flag;
+	u8  pic_flag;
+	u8  orientation;
+	__le32 etc;
+	__le16 temp[2];
+	u8  backlight_info;
+	__le16 backlight_current;
+	u8  dip_switch;
+	u8  host_interrupt;
+	__le16 voltage_28;
+	u8  i2c_device_status;
+	u8  power_status;
+	u8  general_status;
+#define RAVE_SP_STATUS_GS_FIRMWARE_MODE	BIT(1)
+
+	u8  deprecated1;
+	u8  power_led_status;
+	u8  deprecated2;
+	u8  periph_power_shutoff;
+} __packed;
+
+int rave_sp_get_status(struct rave_sp *sp, struct rave_sp_status *status);
+
 #endif /* _LINUX_RAVE_SP_H_ */
