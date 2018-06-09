@@ -1,60 +1,13 @@
-/*
- * Copyright (C) 2017 Zodiac Inflight Innovations
- *
- * This file is dual-licensed: you can use it either under the terms
- * of the GPL or the X11 license, at your option. Note that this dual
- * licensing only applies to this file, and not this project as a
- * whole.
- *
- *  a) This file is free software; you can redistribute it and/or
- *     modify it under the terms of the GNU General Public License
- *     version 2 as published by the Free Software Foundation.
- *
- *     This file is distributed in the hope that it will be useful,
- *     but WITHOUT ANY WARRANTY; without even the implied warranty of
- *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *     GNU General Public License for more details.
- *
- * Or, alternatively,
- *
- *  b) Permission is hereby granted, free of charge, to any person
- *     obtaining a copy of this software and associated documentation
- *     files (the "Software"), to deal in the Software without
- *     restriction, including without limitation the rights to use,
- *     copy, modify, merge, publish, distribute, sublicense, and/or
- *     sell copies of the Software, and to permit persons to whom the
- *     Software is furnished to do so, subject to the following
- *     conditions:
- *
- *     The above copyright notice and this permission notice shall be
- *     included in all copies or substantial portions of the Software.
- *
- *     THE SOFTWARE IS PROVIDED , WITHOUT WARRANTY OF ANY KIND,
- *     EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
- *     OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- *     NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
- *     HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
- *     WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- *     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
- *     OTHER DEALINGS IN THE SOFTWARE.
- */
+// SPDX-License-Identifier: (GPL-2.0 OR MIT)
+// Copyright (C) 2018 Zodiac Inflight Innovations
 
 /dts-v1/;
-#include "imx51.dtsi"
+#include "imx51-zii-common.dtsi"
 #include <dt-bindings/sound/fsl-imx-audmux.h>
 
 / {
 	model = "ZII RDU1 Board";
 	compatible = "zii,imx51-rdu1", "fsl,imx51";
-
-	chosen {
-		stdout-path = &uart1;
-	};
-
-	/* Will be filled by the bootloader */
-	memory@90000000 {
-		reg = <0x90000000 0>;
-	};
 
 	aliases {
 		mdio-gpio0 = &mdio_gpio;
@@ -92,14 +45,6 @@
 		clocks = <&clk_26M_osc_gate>;
 		#clock-cells = <0>;
 		enable-gpios = <&gpio4 26 GPIO_ACTIVE_LOW>;
-	};
-
-	reg_5p0v_main: regulator-5p0v-main {
-		compatible = "regulator-fixed";
-		regulator-name = "5V_MAIN";
-		regulator-min-microvolt = <5000000>;
-		regulator-max-microvolt = <5000000>;
-		regulator-always-on;
 	};
 
 	reg_3p3v: regulator-3p3v {
@@ -147,28 +92,6 @@
 			panel_in: endpoint {
 				remote-endpoint = <&display_out>;
 			};
-		};
-	};
-
-	i2c_gpio: i2c-gpio {
-		compatible = "i2c-gpio";
-		pinctrl-names = "default";
-		pinctrl-0 = <&pinctrl_swi2c>;
-		gpios = <&gpio1 2 GPIO_ACTIVE_HIGH>, /* sda */
-			<&gpio3 4 GPIO_ACTIVE_HIGH>; /* scl */
-		i2c-gpio,delay-us = <50>;
-		status = "okay";
-
-		#address-cells = <1>;
-		#size-cells = <0>;
-
-		sgtl5000: codec@a {
-			compatible = "fsl,sgtl5000";
-			reg = <0x0a>;
-			clocks = <&clk_26M_snd>;
-			VDDA-supply = <&vdig_reg>;
-			VDDIO-supply = <&vvideo_reg>;
-			#sound-dai-cells = <0>;
 		};
 	};
 
@@ -315,178 +238,30 @@
 	};
 };
 
-&cpu {
-	cpu-supply = <&sw1_reg>;
+&usb_vbus {
+	regulator-always-on;
 };
 
-&ecspi1 {
-	pinctrl-names = "default";
-	pinctrl-0 = <&pinctrl_ecspi1>;
-	cs-gpios = <&gpio4 24 GPIO_ACTIVE_HIGH>,
-		   <&gpio4 25 GPIO_ACTIVE_LOW>;
-	status = "okay";
-
-	pmic@0 {
-		compatible = "fsl,mc13892";
-		pinctrl-names = "default";
-		pinctrl-0 = <&pinctrl_pmic>;
-		spi-max-frequency = <6000000>;
-		spi-cs-high;
-		reg = <0>;
-		interrupt-parent = <&gpio1>;
-		interrupts = <8 IRQ_TYPE_LEVEL_HIGH>;
-		fsl,mc13xxx-uses-adc;
-
-		regulators {
-			sw1_reg: sw1 {
-				regulator-min-microvolt = <600000>;
-				regulator-max-microvolt = <1375000>;
-				regulator-boot-on;
-				regulator-always-on;
-			};
-
-			sw2_reg: sw2 {
-				regulator-min-microvolt = <900000>;
-				regulator-max-microvolt = <1850000>;
-				regulator-boot-on;
-				regulator-always-on;
-			};
-
-			sw3_reg: sw3 {
-				regulator-min-microvolt = <1100000>;
-				regulator-max-microvolt = <1850000>;
-				regulator-boot-on;
-				regulator-always-on;
-			};
-
-			sw4_reg: sw4 {
-				regulator-min-microvolt = <1100000>;
-				regulator-max-microvolt = <1850000>;
-				regulator-boot-on;
-				regulator-always-on;
-			};
-
-			vpll_reg: vpll {
-				regulator-min-microvolt = <1050000>;
-				regulator-max-microvolt = <1800000>;
-				regulator-boot-on;
-				regulator-always-on;
-			};
-
-			vdig_reg: vdig {
-				regulator-min-microvolt = <1650000>;
-				regulator-max-microvolt = <1650000>;
-				regulator-boot-on;
-			};
-
-			vsd_reg: vsd {
-				regulator-min-microvolt = <1800000>;
-				regulator-max-microvolt = <3150000>;
-			};
-
-			vusb_reg: vusb {
-				regulator-always-on;
-			};
-
-			vusb2_reg: vusb2 {
-				regulator-min-microvolt = <2400000>;
-				regulator-max-microvolt = <2775000>;
-				regulator-boot-on;
-				regulator-always-on;
-			};
-
-			vvideo_reg: vvideo {
-				regulator-min-microvolt = <2775000>;
-				regulator-max-microvolt = <2775000>;
-			};
-
-			vaudio_reg: vaudio {
-				regulator-min-microvolt = <2300000>;
-				regulator-max-microvolt = <3000000>;
-			};
-
-			vcam_reg: vcam {
-				regulator-min-microvolt = <2500000>;
-				regulator-max-microvolt = <3000000>;
-			};
-
-			vgen1_reg: vgen1 {
-				regulator-min-microvolt = <1200000>;
-				regulator-max-microvolt = <1200000>;
-			};
-
-			vgen2_reg: vgen2 {
-				regulator-min-microvolt = <1200000>;
-				regulator-max-microvolt = <3150000>;
-				regulator-always-on;
-			};
-
-			vgen3_reg: vgen3 {
-				regulator-min-microvolt = <1800000>;
-				regulator-max-microvolt = <2900000>;
-				regulator-always-on;
-			};
-		};
-
-		leds {
-			#address-cells = <1>;
-			#size-cells = <0>;
-			led-control = <0x0 0x0 0x3f83f8 0x0>;
-
-			sysled0@3 {
-				reg = <3>;
-				label = "system:green:status";
-				linux,default-trigger = "default-on";
-			};
-
-			sysled1@4 {
-				reg = <4>;
-				label = "system:green:act";
-				linux,default-trigger = "heartbeat";
-			};
-		};
-	};
-
-	flash@1 {
-		#address-cells = <1>;
-		#size-cells = <1>;
-		compatible = "atmel,at45db642d", "atmel,at45", "atmel,dataflash";
-		spi-max-frequency = <25000000>;
-		reg = <1>;
-	};
+&ecspi2 {
+	status = "disabled";
 };
 
 &esdhc1 {
 	pinctrl-names = "default";
-	pinctrl-0 = <&pinctrl_esdhc1>;
+	pinctrl-0 = <&pinctrl_esdhc1_4bit>;
 	bus-width = <4>;
-	no-1-8-v;
-	non-removable;
-	no-sdio;
-	no-sd;
-	status = "okay";
+};
+
+&esdhc4 {
+	status = "disabled";
 };
 
 &fec {
-	pinctrl-names = "default";
-	pinctrl-0 = <&pinctrl_fec>;
-	phy-mode = "mii";
 	phy-reset-gpios = <&gpio2 14 GPIO_ACTIVE_LOW>;
 	phy-supply = <&vgen3_reg>;
-	status = "okay";
 };
 
 &i2c2 {
-	pinctrl-names = "default";
-	pinctrl-0 = <&pinctrl_i2c2>;
-	status = "okay";
-
-	eeprom@50 {
-		compatible = "atmel,24c04";
-		pagesize = <16>;
-		reg = <0x50>;
-	};
-
 	hpa1: amp@60 {
 		compatible = "ti,tpa6130a2";
 		reg = <0x60>;
@@ -550,6 +325,20 @@
 
 };
 
+&i2c_gpio {
+	gpios = <&gpio1 2 GPIO_ACTIVE_HIGH>, /* sda */
+		<&gpio3 4 GPIO_ACTIVE_HIGH>; /* scl */
+
+	sgtl5000: codec@a {
+		compatible = "fsl,sgtl5000";
+		reg = <0x0a>;
+		clocks = <&clk_26M_snd>;
+		VDDA-supply = <&vdig_reg>;
+		VDDIO-supply = <&vvideo_reg>;
+		#sound-dai-cells = <0>;
+	};
+};
+
 &ipu_di0_disp1 {
 	remote-endpoint = <&display_in>;
 };
@@ -558,23 +347,7 @@
 	status = "okay";
 };
 
-&uart1 {
-	pinctrl-names = "default";
-	pinctrl-0 = <&pinctrl_uart1>;
-	status = "okay";
-};
-
-&uart2 {
-	pinctrl-names = "default";
-	pinctrl-0 = <&pinctrl_uart2>;
-	status = "okay";
-};
-
 &uart3 {
-	pinctrl-names = "default";
-	pinctrl-0 = <&pinctrl_uart3>;
-	status = "okay";
-
 	rave-sp {
 		compatible = "zii,rave-sp-rdu1";
 		current-speed = <38400>;
@@ -593,7 +366,7 @@
 	fsl,usbphy = <&usbh1phy>;
 	disable-over-current;
 	maximum-speed = "full-speed";
-	vbus-supply = <&reg_5p0v_main>;
+	vbus-supply = <&usb_vbus>;
 	status = "okay";
 };
 
@@ -604,20 +377,12 @@
 	phy_type = "ulpi";
 	fsl,usbphy = <&usbh2phy>;
 	disable-over-current;
-	vbus-supply = <&reg_5p0v_main>;
+	vbus-supply = <&usb_vbus>;
 	status = "okay";
 };
 
-&usbphy0 {
-	vcc-supply = <&vusb_reg>;
-};
-
-&usbotg {
-	dr_mode = "host";
-	disable-over-current;
-	phy_type = "utmi_wide";
-	vbus-supply = <&reg_5p0v_main>;
-	status = "okay";
+&sysled3 {
+	label = "system:green:status";
 };
 
 &iomuxc {
@@ -639,27 +404,6 @@
 	pinctrl_clk26mhz: clk26mhzgrp {
 		fsl,pins = <
 			MX51_PAD_DI1_PIN12__GPIO3_1		0x85
-		>;
-	};
-
-	pinctrl_ecspi1: ecspi1grp {
-		fsl,pins = <
-			MX51_PAD_CSPI1_MISO__ECSPI1_MISO	0x185
-			MX51_PAD_CSPI1_MOSI__ECSPI1_MOSI	0x185
-			MX51_PAD_CSPI1_SCLK__ECSPI1_SCLK	0x185
-			MX51_PAD_CSPI1_SS0__GPIO4_24		0x85
-			MX51_PAD_CSPI1_SS1__GPIO4_25		0x85
-		>;
-	};
-
-	pinctrl_esdhc1: esdhc1grp {
-		fsl,pins = <
-			MX51_PAD_SD1_CMD__SD1_CMD		0x400020d5
-			MX51_PAD_SD1_CLK__SD1_CLK		0x20d5
-			MX51_PAD_SD1_DATA0__SD1_DATA0		0x20d5
-			MX51_PAD_SD1_DATA1__SD1_DATA1		0x20d5
-			MX51_PAD_SD1_DATA2__SD1_DATA2		0x20d5
-			MX51_PAD_SD1_DATA3__SD1_DATA3		0x20d5
 		>;
 	};
 
@@ -693,13 +437,6 @@
 			MX51_PAD_CSI2_D19__GPIO4_12		0x85
 			MX51_PAD_CSI2_HSYNC__GPIO4_14		0x85
 			MX51_PAD_CSI2_PIXCLK__GPIO4_15		0x85
-		>;
-	};
-
-	pinctrl_i2c2: i2c2grp {
-		fsl,pins = <
-			MX51_PAD_KEY_COL4__I2C2_SCL		0x400001ed
-			MX51_PAD_KEY_COL5__I2C2_SDA		0x400001ed
 		>;
 	};
 
@@ -738,13 +475,6 @@
 	pinctrl_panel: panelgrp {
 		fsl,pins = <
 			MX51_PAD_DI1_D0_CS__GPIO3_3		0x85
-		>;
-	};
-
-	pinctrl_pmic: pmicgrp {
-		fsl,pins = <
-			MX51_PAD_GPIO1_4__GPIO1_4		0x1e0
-			MX51_PAD_GPIO1_8__GPIO1_8		0x21e2
 		>;
 	};
 
