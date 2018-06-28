@@ -69,19 +69,18 @@
 #define VEND1_GLOBAL_INT_VEND_MASK_PCS		BIT(0xe)
 #define VEND1_GLOBAL_INT_VEND_MASK_PMA		BIT(0xf)
 
-/* Vendor specific 2, MMIO_MMD_VEND2 */
-#define VEND2_THERMAL_PROV_HIGH_TEMP_FAIL	0xc421
-#define VEND2_THERMAL_PROV_LOW_TEMP_FAIL	0xc422
-#define VEND2_THERMAL_PROV_HIGH_TEMP_WARN	0xc423
-#define VEND2_THERMAL_PROV_LOW_TEMP_WARN	0xc424
-#define VEND2_THERMAL_STAT1			0xc820
-#define VEND2_THERMAL_STAT2			0xc821
-#define VEND2_THERMAL_STAT2_VALID		BIT(0)
-#define VEND2_GENERAL_STAT1			0xc830
-#define VEND2_GENERAL_STAT1_HIGH_TEMP_FAIL	BIT(0xe)
-#define VEND2_GENERAL_STAT1_LOW_TEMP_FAIL	BIT(0xd)
-#define VEND2_GENERAL_STAT1_HIGH_TEMP_WARN	BIT(0xc)
-#define VEND2_GENERAL_STAT1_LOW_TEMP_WARN	BIT(0xb)
+#define VEND1_THERMAL_PROV_HIGH_TEMP_FAIL	0xc421
+#define VEND1_THERMAL_PROV_LOW_TEMP_FAIL	0xc422
+#define VEND1_THERMAL_PROV_HIGH_TEMP_WARN	0xc423
+#define VEND1_THERMAL_PROV_LOW_TEMP_WARN	0xc424
+#define VEND1_THERMAL_STAT1			0xc820
+#define VEND1_THERMAL_STAT2			0xc821
+#define VEND1_THERMAL_STAT2_VALID		BIT(0)
+#define VEND1_GENERAL_STAT1			0xc830
+#define VEND1_GENERAL_STAT1_HIGH_TEMP_FAIL	BIT(0xe)
+#define VEND1_GENERAL_STAT1_LOW_TEMP_FAIL	BIT(0xd)
+#define VEND1_GENERAL_STAT1_HIGH_TEMP_WARN	BIT(0xc)
+#define VEND1_GENERAL_STAT1_LOW_TEMP_WARN	BIT(0xb)
 
 struct aqr_priv {
 	struct device *hwmon_dev;
@@ -212,21 +211,21 @@ static umode_t aqr_hwmon_is_visible(const void *data,
 
 static int aqr_hwmon_get(struct phy_device *phydev, int reg, long *value)
 {
-	int temp = phy_read_mmd(phydev, MDIO_MMD_VEND2, reg);
+	int temp = phy_read_mmd(phydev, MDIO_MMD_VEND1, reg);
 
 	if (temp < 0)
 		return temp;
+	if (temp > 0x8000)
+		temp -= 0x10000;
 
-	temp = ((temp & 0xff) - 75) * 1000;
-
-	*value = temp;
+	*value = temp * 1000 / 256;
 
 	return 0;
 }
 
 static int aqr_hwmon_status1(struct phy_device *phydev, int bit, long *value)
 {
-	int reg = phy_read_mmd(phydev, MDIO_MMD_VEND2, VEND2_GENERAL_STAT1);
+	int reg = phy_read_mmd(phydev, MDIO_MMD_VEND1, VEND1_GENERAL_STAT1);
 
 	if (reg < 0)
 		return reg;
@@ -247,49 +246,49 @@ static int aqr_hwmon_read(struct device *dev, enum hwmon_sensor_types type,
 
 	switch (attr) {
 	case hwmon_temp_input:
-		reg = phy_read_mmd(phydev, MDIO_MMD_VEND2,
-				   VEND2_THERMAL_STAT2);
+		reg = phy_read_mmd(phydev, MDIO_MMD_VEND1,
+				   VEND1_THERMAL_STAT2);
 		if (reg < 0)
 			return reg;
-		if (!(reg & VEND2_THERMAL_STAT2_VALID))
+		if (!(reg & VEND1_THERMAL_STAT2_VALID))
 			return -EIO;
 
-		return aqr_hwmon_get(phydev, VEND2_THERMAL_STAT1, value);
+		return aqr_hwmon_get(phydev, VEND1_THERMAL_STAT1, value);
 
 	case hwmon_temp_lcrit:
-		return aqr_hwmon_get(phydev, VEND2_THERMAL_PROV_LOW_TEMP_FAIL,
+		return aqr_hwmon_get(phydev, VEND1_THERMAL_PROV_LOW_TEMP_FAIL,
 				     value);
 
 	case hwmon_temp_min:
-		return aqr_hwmon_get(phydev, VEND2_THERMAL_PROV_LOW_TEMP_WARN,
+		return aqr_hwmon_get(phydev, VEND1_THERMAL_PROV_LOW_TEMP_WARN,
 				     value);
 
 	case hwmon_temp_max:
-		return aqr_hwmon_get(phydev, VEND2_THERMAL_PROV_HIGH_TEMP_WARN,
+		return aqr_hwmon_get(phydev, VEND1_THERMAL_PROV_HIGH_TEMP_WARN,
 				     value);
 
 	case hwmon_temp_crit:
-		return aqr_hwmon_get(phydev, VEND2_THERMAL_PROV_HIGH_TEMP_FAIL,
+		return aqr_hwmon_get(phydev, VEND1_THERMAL_PROV_HIGH_TEMP_FAIL,
 				     value);
 
 	case hwmon_temp_lcrit_alarm:
 		return aqr_hwmon_status1(phydev,
-					 VEND2_GENERAL_STAT1_LOW_TEMP_FAIL,
+					 VEND1_GENERAL_STAT1_LOW_TEMP_FAIL,
 					 value);
 
 	case hwmon_temp_min_alarm:
 		return aqr_hwmon_status1(phydev,
-					 VEND2_GENERAL_STAT1_LOW_TEMP_WARN,
+					 VEND1_GENERAL_STAT1_LOW_TEMP_WARN,
 					 value);
 
 	case hwmon_temp_max_alarm:
 		return aqr_hwmon_status1(phydev,
-					 VEND2_GENERAL_STAT1_HIGH_TEMP_WARN,
+					 VEND1_GENERAL_STAT1_HIGH_TEMP_WARN,
 					 value);
 
 	case hwmon_temp_crit_alarm:
 		return aqr_hwmon_status1(phydev,
-					 VEND2_GENERAL_STAT1_HIGH_TEMP_FAIL,
+					 VEND1_GENERAL_STAT1_HIGH_TEMP_FAIL,
 					 value);
 	default:
 		return -EOPNOTSUPP;
@@ -317,7 +316,7 @@ static u32 aqr_hwmon_temp_config[] = {
 	HWMON_T_INPUT |
 	HWMON_T_MAX | HWMON_T_MIN |
 	HWMON_T_MAX_ALARM | HWMON_T_MIN_ALARM |
-	HWMON_T_CRIT | HWMON_T_LCRIT,
+	HWMON_T_CRIT | HWMON_T_LCRIT |
 	HWMON_T_CRIT_ALARM | HWMON_T_LCRIT_ALARM,
 	0,
 };
