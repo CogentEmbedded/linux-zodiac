@@ -19,6 +19,7 @@
 #include <linux/hwmon.h>
 #include <linux/phy.h>
 #include <linux/mdio.h>
+#include <linux/mtd/spi-nor.h>
 
 #define PHY_ID_AQ1202	0x03a1b445
 #define PHY_ID_AQ2104	0x03a1b460
@@ -102,6 +103,13 @@
 struct aqr_priv {
 	struct device *hwmon_dev;
 	char *hwmon_name;
+
+	struct spi_nor *nvr;
+	struct mutex nvr_lock;
+	u16 global_nvr_prov_w0,
+	    global_nvr_prov_w1,
+	    global_nvr_prov_w2,
+	    global_control_w1;
 };
 
 static int aqr_config_aneg(struct phy_device *phydev)
@@ -411,6 +419,531 @@ static int aqr_hwmon_probe(struct phy_device *phydev)
 }
 #endif
 
+static int aqr_nvr_wait_ready(struct phy_device *phydev)
+{
+	unsigned long timeout = jiffies + HZ / 10;
+	int ret;
+
+	do {
+		ret = __phy_read_mmd(phydev, MDIO_MMD_VEND1, 0x0100);
+		if (ret < 0)
+			return ret;
+		if (!(ret & BIT(8)))
+			return 0;
+	} while (time_before(jiffies, timeout));
+
+	return -ETIMEDOUT;
+}
+
+static int aqr_nvr_rx(struct phy_device *phydev, u8 opcode,
+		u8 addr_size, u32 addr,
+		u8 dummy_size,
+		u32 data_size, u8 *data)
+{
+	int ret;
+	u16 val_p, val_i;
+
+	ret = __phy_read_mmd(phydev, MDIO_MMD_VEND1, 0xc450);
+	if (ret < 0)
+		return ret;
+	val_p = ret;
+
+	if (WARN_ON(addr_size > 3))
+		return -EIO;
+	val_p &= ~GENMASK(1, 0);
+	val_p |= addr_size;
+
+	if (WARN_ON(dummy_size > 4))
+		return -EIO;
+	val_p &= ~GENMASK(6, 4);
+	val_p |= (dummy_size << 4);
+
+	val_p &= ~GENMASK(10, 8);
+	val_p |= (min_t(u16, 4, data_size) << 8);
+
+	ret = __phy_write_mmd(phydev, MDIO_MMD_VEND1, 0xc450, val_p);
+	if (ret < 0)
+		return ret;
+
+	if (addr_size) {
+		ret = __phy_write_mmd(phydev, MDIO_MMD_VEND1, 0x0103,
+				addr & 0xffff);
+		if (ret < 0)
+			return ret;
+	}
+	if (addr_size > 2) {
+		ret = __phy_modify_mmd(phydev, MDIO_MMD_VEND1, 0x0102,
+				0xff, (addr >> 16) & 0xff);
+		if (ret < 0)
+			return ret;
+	}
+
+	ret = __phy_read_mmd(phydev, MDIO_MMD_VEND1, 0x0100);
+	if (ret < 0)
+		return ret;
+	val_i = ret;
+
+	val_i &= (BIT(11) | BIT(9));	/* clear all but unused bits */
+	val_i |= BIT(15);		/* start op */
+	val_i |= opcode;
+
+	if (data_size > 4) {
+		for (; data_size > 4; data_size -= 4) {
+			ret = __phy_write_mmd(phydev, MDIO_MMD_VEND1, 0x0100,
+					val_i | BIT(10));	/* use burst */
+			if (ret < 0)
+				return ret;
+			ret = aqr_nvr_wait_ready(phydev);
+			if (ret < 0)
+				return ret;
+			ret = __phy_read_mmd(phydev, MDIO_MMD_VEND1, 0x0105);
+			if (ret < 0)
+				return ret;
+			*data++ = ret & 0xff;
+			*data++ = ret >> 8;
+			ret = __phy_read_mmd(phydev, MDIO_MMD_VEND1, 0x0104);
+			if (ret < 0)
+				return ret;
+			*data++ = ret & 0xff;
+			*data++ = ret >> 8;
+		}
+
+		if (data_size != 4) {
+			val_p &= ~GENMASK(10, 8);
+			val_p |= (data_size << 8);
+			ret = __phy_write_mmd(phydev, MDIO_MMD_VEND1, 0xc450,
+					val_p);
+			if (ret < 0)
+				return ret;
+		}
+	}
+
+	ret = __phy_write_mmd(phydev, MDIO_MMD_VEND1, 0x0100, val_i);
+	if (ret < 0)
+		return ret;
+	ret = aqr_nvr_wait_ready(phydev);
+	if (ret < 0)
+		return ret;
+	if (data_size) {
+		ret = __phy_read_mmd(phydev, MDIO_MMD_VEND1, 0x0105);
+		if (ret < 0)
+			return ret;
+		*data++ = ret & 0xff;
+		if (data_size > 1)
+			*data++ = ret >> 8;
+	}
+	if (data_size > 2) {
+		ret = __phy_read_mmd(phydev, MDIO_MMD_VEND1, 0x0104);
+		if (ret < 0)
+			return ret;
+		*data++ = ret & 0xff;
+		if (data_size > 3)
+			*data++ = ret >> 8;
+	}
+
+	return 0;
+}
+
+static int aqr_nvr_tx(struct phy_device *phydev, u8 opcode,
+		u8 addr_size, u32 addr,
+		u32 data_size, const u8 *data)
+{
+	int ret;
+	u16 val_p, val_i, val_d;
+
+	ret = __phy_read_mmd(phydev, MDIO_MMD_VEND1, 0xc450);
+	if (ret < 0)
+		return ret;
+	val_p = ret;
+
+	if (WARN_ON(addr_size > 3))
+		return -EIO;
+	val_p &= ~GENMASK(1, 0);
+	val_p |= addr_size;
+
+	val_p &= ~GENMASK(6, 4);	/* no dummy bytes for tx */
+
+	val_p &= ~GENMASK(10, 8);
+	val_p |= (min_t(u16, 4, data_size) << 8);
+
+	ret = __phy_write_mmd(phydev, MDIO_MMD_VEND1, 0xc450, val_p);
+	if (ret < 0)
+		return ret;
+
+	if (addr_size) {
+		ret = __phy_write_mmd(phydev, MDIO_MMD_VEND1, 0x0103,
+				addr & 0xffff);
+		if (ret < 0)
+			return ret;
+	}
+	if (addr_size > 2) {
+		ret = __phy_modify_mmd(phydev, MDIO_MMD_VEND1, 0x0102,
+				0xff, (addr >> 16) & 0xff);
+		if (ret < 0)
+			return ret;
+	}
+
+	ret = __phy_read_mmd(phydev, MDIO_MMD_VEND1, 0x0100);
+	if (ret < 0)
+		return ret;
+	val_i = ret;
+
+	val_i &= (BIT(11) | BIT(9));	/* clear all but unused bits */
+	val_i |= BIT(15);		/* start op */
+	val_i |= BIT(14);		/* write */
+	val_i |= opcode;
+
+	if (data_size > 4) {
+		for (; data_size > 4; data_size -= 4, data += 4) {
+			ret = __phy_write_mmd(phydev, MDIO_MMD_VEND1, 0x0105,
+					data[0] | (data[1] << 8));
+			if (ret < 0)
+				return ret;
+			ret = __phy_write_mmd(phydev, MDIO_MMD_VEND1, 0x0104,
+					data[2] | (data[3] << 8));
+			if (ret < 0)
+				return ret;
+
+			ret = __phy_write_mmd(phydev, MDIO_MMD_VEND1, 0x0100,
+					val_i | BIT(10));	/* use burst */
+			if (ret < 0)
+				return ret;
+			ret = aqr_nvr_wait_ready(phydev);
+			if (ret < 0)
+				return ret;
+		}
+
+		if (data_size != 4) {
+			val_p &= ~GENMASK(10, 8);
+			val_p |= (data_size << 8);
+			ret = __phy_write_mmd(phydev, MDIO_MMD_VEND1, 0xc450,
+					val_p);
+			if (ret < 0)
+				return ret;
+		}
+	}
+
+	val_d = data[0];
+	if (data_size > 1)
+		val_d |= (data[1] << 8);
+	ret = __phy_write_mmd(phydev, MDIO_MMD_VEND1, 0x0105, val_d);
+	if (ret < 0)
+		return ret;
+	if (data_size > 2) {
+		val_d = data[2];
+		if (data_size > 3)
+			val_d |= (data[3] << 8);
+		ret = __phy_write_mmd(phydev, MDIO_MMD_VEND1, 0x0104, val_d);
+		if (ret < 0)
+			return ret;
+	}
+
+	ret = __phy_write_mmd(phydev, MDIO_MMD_VEND1, 0x0100, val_i);
+	if (ret < 0)
+		return ret;
+
+	return aqr_nvr_wait_ready(phydev);
+}
+
+static int aqr_nvr_read_reg(struct spi_nor *nor, u8 opcode, u8 *buf, int len)
+{
+	struct phy_device *phydev =
+		container_of(nor->dev, typeof(*phydev), mdio.dev);
+	int ret;
+
+	if (WARN_ON(len < 0))
+		return -EIO;
+
+	if (WARN_ON((nor->read_dummy % 8)))
+		return -EIO;
+
+	mutex_lock(&phydev->mdio.bus->mdio_lock);
+	ret = aqr_nvr_rx(phydev, opcode, 0, 0, nor->read_dummy / 8, len, buf);
+	mutex_unlock(&phydev->mdio.bus->mdio_lock);
+
+	return ret;
+}
+
+static int aqr_nvr_write_reg(struct spi_nor *nor, u8 opcode, u8 *buf, int len)
+{
+	struct phy_device *phydev =
+		container_of(nor->dev, typeof(*phydev), mdio.dev);
+	int ret;
+
+	if (WARN_ON(len < 0))
+		return -EIO;
+
+	mutex_lock(&phydev->mdio.bus->mdio_lock);
+	if (len == 0)
+		ret = aqr_nvr_rx(phydev, opcode, 0, 0, 0, 0, NULL);
+	else
+		ret = aqr_nvr_tx(phydev, opcode, 0, 0, len, buf);
+	mutex_unlock(&phydev->mdio.bus->mdio_lock);
+
+	return ret;
+}
+
+static ssize_t aqr_nvr_read(struct spi_nor *nor, loff_t from,
+		size_t len, u_char *read_buf)
+{
+	struct phy_device *phydev =
+		container_of(nor->dev, typeof(*phydev), mdio.dev);
+	int ret;
+
+	if (WARN_ON((nor->read_dummy % 8)))
+		return -EIO;
+
+	mutex_lock(&phydev->mdio.bus->mdio_lock);
+	ret = aqr_nvr_rx(phydev, nor->read_opcode,
+			nor->addr_width, from,
+			nor->read_dummy / 8,
+			len, read_buf);
+	mutex_unlock(&phydev->mdio.bus->mdio_lock);
+
+	return ret ? ret : len;
+}
+
+static ssize_t aqr_nvr_write(struct spi_nor *nor, loff_t to,
+		size_t len, const u_char *write_buf)
+{
+	struct phy_device *phydev =
+		container_of(nor->dev, typeof(*phydev), mdio.dev);
+	int ret;
+
+	mutex_lock(&phydev->mdio.bus->mdio_lock);
+	ret = aqr_nvr_tx(phydev, nor->program_opcode,
+			nor->addr_width, to, len, write_buf);
+	mutex_unlock(&phydev->mdio.bus->mdio_lock);
+
+	return ret ? ret : len;
+}
+
+static int aqr_nvr_attach(struct device *dev)
+{
+	struct phy_device *phydev =
+		container_of(dev, typeof(*phydev), mdio.dev);
+	struct aqr_priv *priv = dev_get_drvdata(dev);
+	const struct spi_nor_hwcaps nvr_caps = {
+		.mask = SNOR_HWCAPS_READ | SNOR_HWCAPS_PP,
+	};
+	int ret;
+
+	mutex_lock(&priv->nvr_lock);
+
+	if (priv->nvr) {
+		ret = 0;
+		goto out;
+	}
+
+	/* Before accessing flash, need to
+	 * (1) save value of register [1e.c001] that control PHY's CPU
+	 * (2) save value of registers [1e.c450 .. 1e.c452] that control
+	 *     NVR interface (keeping existing values could be required
+	 *     for PHY to be able to read from flash)
+	 * (3) halt PHY's CPU
+	 * (4) reset PHY but preserve PHY's registers
+	 * (5) setup flash to be controlled from registers
+	 *
+	 * This is more or less same as Aquantia API does
+	 */
+
+	mutex_lock(&phydev->mdio.bus->mdio_lock);
+
+	/* (1) */
+
+	ret = __phy_read_mmd(phydev, MDIO_MMD_VEND1, 0xc001);
+	if (ret < 0)
+		goto out;
+	priv->global_control_w1 = ret;
+
+	/* (2) */
+
+	ret = __phy_read_mmd(phydev, MDIO_MMD_VEND1, 0xc450);
+	if (ret < 0)
+		goto out;
+	priv->global_nvr_prov_w0 = ret;
+
+	ret = __phy_read_mmd(phydev, MDIO_MMD_VEND1, 0xc451);
+	if (ret < 0)
+		goto out;
+	priv->global_nvr_prov_w1 = ret;
+
+	ret = __phy_read_mmd(phydev, MDIO_MMD_VEND1, 0xc452);
+	if (ret < 0)
+		goto out;
+	priv->global_nvr_prov_w2 = ret;
+
+	/* (3) */
+
+	/* stall phy's processor */
+	ret = __phy_set_bits_mmd(phydev, MDIO_MMD_VEND1, 0xc001,
+			BIT(0) | BIT(6));
+	if (ret < 0)
+		goto out_restore;
+
+	/* (4) */
+
+	/* disable daisy chain */
+	ret = __phy_set_bits_mmd(phydev, MDIO_MMD_VEND1, 0xc452, BIT(0));
+	if (ret < 0)
+		goto out_restore;
+
+	/* force reset of daisy chain machinery */
+
+	/* lock out reset of register map */
+	ret = __phy_set_bits_mmd(phydev, MDIO_MMD_VEND1, 0xc006, BIT(14));
+	if (ret < 0)
+		goto out_restore;
+
+	/* do reset */
+	ret = __phy_set_bits_mmd(phydev, MDIO_MMD_VEND1, 0x0000, BIT(15));
+	if (ret < 0)
+		goto out_restore;
+	udelay(100);
+	ret = __phy_clear_bits_mmd(phydev, MDIO_MMD_VEND1, 0x0000, BIT(15));
+	if (ret < 0)
+		goto out_restore;
+
+	/* unlock reset of register map */
+	ret = __phy_clear_bits_mmd(phydev, MDIO_MMD_VEND1, 0xc006, BIT(14));
+	if (ret < 0)
+		goto out_restore;
+
+	/* (5) */
+
+	ret = __phy_set_bits_mmd(phydev, MDIO_MMD_VEND1, 0xc451, BIT(8));
+	if (ret < 0)
+		goto out_restore;
+
+	mutex_unlock(&phydev->mdio.bus->mdio_lock);
+
+	priv->nvr = kzalloc(sizeof(*priv->nvr), GFP_KERNEL);
+	if (!priv->nvr) {
+		ret = -ENOMEM;
+		goto out_relock;
+	}
+
+	priv->nvr->dev = dev;
+	priv->nvr->mtd.name = "aqr-nvr";
+
+	priv->nvr->read_reg = aqr_nvr_read_reg;
+	priv->nvr->write_reg = aqr_nvr_write_reg;
+	priv->nvr->read = aqr_nvr_read;
+	priv->nvr->write = aqr_nvr_write;
+
+	ret = spi_nor_scan(priv->nvr, NULL, &nvr_caps);
+	if (ret < 0)
+		goto out_free;
+
+	ret = mtd_device_register(&priv->nvr->mtd, NULL, 0);
+	if (ret < 0)
+		goto out_free;
+
+	mutex_unlock(&priv->nvr_lock);
+	return 0;
+
+out_free:
+	kfree(priv->nvr);
+	priv->nvr = NULL;
+out_relock:
+	mutex_lock(&phydev->mdio.bus->mdio_lock);
+out_restore:
+	__phy_write_mmd(phydev, MDIO_MMD_VEND1,
+			0xc452, priv->global_nvr_prov_w2);
+	__phy_write_mmd(phydev, MDIO_MMD_VEND1,
+			0xc451, priv->global_nvr_prov_w1);
+	__phy_write_mmd(phydev, MDIO_MMD_VEND1,
+			0xc450, priv->global_nvr_prov_w0);
+	__phy_write_mmd(phydev, MDIO_MMD_VEND1,
+			0xc001, priv->global_control_w1);
+out:
+	mutex_unlock(&phydev->mdio.bus->mdio_lock);
+	mutex_unlock(&priv->nvr_lock);
+	return ret;
+}
+
+static int aqr_nvr_detach(struct device *dev)
+{
+	struct phy_device *phydev =
+		container_of(dev, typeof(*phydev), mdio.dev);
+	struct aqr_priv *priv = dev_get_drvdata(dev);
+	int ret, ret2;
+
+	mutex_lock(&priv->nvr_lock);
+
+	if (!priv->nvr) {
+		ret = 0;
+		goto out;
+	}
+
+	mtd_device_unregister(&priv->nvr->mtd);
+
+	kfree(priv->nvr);
+	priv->nvr = NULL;
+
+	mutex_lock(&phydev->mdio.bus->mdio_lock);
+
+	ret = __phy_write_mmd(phydev, MDIO_MMD_VEND1,
+			0xc452, priv->global_nvr_prov_w2);
+
+	ret2 = __phy_write_mmd(phydev, MDIO_MMD_VEND1,
+			0xc451, priv->global_nvr_prov_w1);
+	if (ret2 && !ret)
+		ret = ret2;
+
+	ret2 = __phy_write_mmd(phydev, MDIO_MMD_VEND1,
+			0xc450, priv->global_nvr_prov_w0);
+	if (ret2 && !ret)
+		ret = ret2;
+
+	ret2 = __phy_write_mmd(phydev, MDIO_MMD_VEND1,
+			0xc001, priv->global_control_w1);
+	if (ret2 && !ret)
+		ret = ret2;
+
+	mutex_unlock(&phydev->mdio.bus->mdio_lock);
+out:
+	mutex_unlock(&priv->nvr_lock);
+	return ret;
+}
+
+static ssize_t nvr_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct aqr_priv *priv = dev_get_drvdata(dev);
+	ssize_t ret;
+
+	mutex_lock(&priv->nvr_lock);
+	if (priv->nvr)
+		ret = sprintf(buf, "mtd%d\n", priv->nvr->mtd.index);
+	else
+		ret = sprintf(buf, "(none)\n");
+	mutex_unlock(&priv->nvr_lock);
+
+	return ret;
+}
+
+static ssize_t nvr_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	char tmpbuf[16], *tmp;
+	ssize_t ret;
+
+	strlcpy(tmpbuf, buf, sizeof(tmpbuf));
+	tmp = strstrip(tmpbuf);
+
+	if (!strcmp(tmp, "attach"))
+		ret = aqr_nvr_attach(dev);
+	else if (!strcmp(tmp, "detach"))
+		ret = aqr_nvr_detach(dev);
+	else
+		ret = -EINVAL;
+
+	return ret ? ret : count;
+}
+
+static DEVICE_ATTR_RW(nvr);
+
 static int aqr_probe(struct phy_device *phydev)
 {
 	struct aqr_priv *priv;
@@ -431,7 +964,23 @@ static int aqr_probe(struct phy_device *phydev)
 	if (ret)
 		return ret;
 
+	ret = device_create_file(&phydev->mdio.dev, &dev_attr_nvr);
+	if (ret)
+		return ret;
+	mutex_init(&priv->nvr_lock);
+
 	return 0;
+}
+
+static void aqr_remove(struct phy_device *phydev)
+{
+	struct device *dev = &phydev->mdio.dev;
+	struct aqr_priv *priv = dev_get_drvdata(dev);
+
+	if (priv->nvr)
+		aqr_nvr_detach(dev);
+
+	device_remove_file(dev, &dev_attr_nvr);
 }
 
 static struct phy_driver aqr_driver[] = {
@@ -490,6 +1039,7 @@ static struct phy_driver aqr_driver[] = {
 	.features	= PHY_AQR_FEATURES,
 	.flags		= PHY_HAS_INTERRUPT,
 	.probe          = aqr_probe,
+	.remove		= aqr_remove,
 	.aneg_done	= genphy_c45_aneg_done,
 	.config_aneg    = aqr_config_aneg,
 	.config_intr	= aqr_config_intr,
@@ -503,6 +1053,7 @@ static struct phy_driver aqr_driver[] = {
 	.features	= PHY_AQR_FEATURES,
 	.flags		= PHY_HAS_INTERRUPT,
 	.probe          = aqr_probe,
+	.remove		= aqr_remove,
 	.aneg_done	= genphy_c45_aneg_done,
 	.config_aneg    = aqr_config_aneg,
 	.config_intr	= aqr_config_intr,
