@@ -71,13 +71,16 @@
 
 		switch0: switch0@0 {
 			compatible = "marvell,mv88e6190";
-			pinctrl-0 = <&pinctrl_sw_reset>;
+			pinctrl-0 = <&pinctrl_switch>;
 			pinctrl-names = "default";
 			#address-cells = <1>;
 			#size-cells = <0>;
 			reg = <0>;
-			eeprom-length = <512>;
+			eeprom-length = <4096>;
 			reset-gpios = <&gpio3 11 GPIO_ACTIVE_LOW>;
+			interrupt-parent = <&gpio3>;
+			interrupts = <2 IRQ_TYPE_EDGE_FALLING>;
+			interrupt-controller;
 
 			ports {
 				#address-cells = <1>;
@@ -106,16 +109,52 @@
 					label = "eth_cu_1000_5";
 				};
 
-				port@7 {
-					reg = <7>;
-					label = "eth_cu_100_2";
-				};
+				/* hardware-disabled in flavour of port9 */
+				//port@7 {
+				//	reg = <7>;
+				//	label = "eth_cu_100_2";
+				//};
 
 				port@8 {
 					reg = <8>;
 					label = "eth_cu_1000_1";
 				};
+
+				port@9 {
+					reg = <9>;
+					label = "eth_aq";
+					phy-handle = <&aquantia>;
+				};
 			};
+
+			mdio1 {
+				compatible = "marvell,mv88e6xxx-mdio-external";
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				aquantia: phy@0 {
+					compatible = "ethernet-phy-ieee802.3-c45";
+					reg = <0>;
+				};
+			};
+		};
+	};
+};
+
+/* UART1 pins are used as GPIO */
+&uart1 {
+	status = "disabled";
+};
+
+&iomuxc {
+	vf610-zii {
+		pinctrl_switch: pinctrl-switch {
+			fsl,pins = <
+				/* switch reset */
+				VF610_PAD_PTE2__GPIO_107	0x31c2
+				/* switch interrupt */
+				VF610_PAD_PTB28__GPIO_98	0x0001
+			>;
 		};
 	};
 };
