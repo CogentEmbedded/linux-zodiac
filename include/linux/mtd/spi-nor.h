@@ -97,6 +97,7 @@
 #define SPINOR_OP_XSE		0x50	/* Sector erase */
 #define SPINOR_OP_XPP		0x82	/* Page program */
 #define SPINOR_OP_XRDSR		0xd7	/* Read status register */
+#define SPINOR_OP_RMW		0x58	/* Page read-modify-write */
 
 #define XSR_PAGESIZE		BIT(0)	/* Page size in Po2 or Linear */
 #define XSR_RDY			BIT(7)	/* Ready */

@@ -988,6 +988,8 @@ static const struct flash_info spi_nor_ids[] = {
 
 	{ "at45db081d", INFO(0x1f2500, 0, 64 * 1024, 16, SECT_4K) },
 
+	{ "at45db641e", S3AN_INFO(0x1f2800, 4096, 264) },
+
 	/* EON -- en25xxx */
 	{ "en25f32",    INFO(0x1c3116, 0, 64 * 1024,   64, SECT_4K) },
 	{ "en25p32",    INFO(0x1c2016, 0, 64 * 1024,   64, 0) },
@@ -1420,6 +1422,7 @@ static int spi_nor_write(struct mtd_info *mtd, loff_t to, size_t len,
 	struct spi_nor *nor = mtd_to_spi_nor(mtd);
 	size_t page_offset, page_remain, i;
 	ssize_t ret;
+	u8 program_opcode;
 
 	dev_dbg(nor->dev, "to 0x%08x, len %zd\n", (u32)to, len);
 
@@ -1454,7 +1457,12 @@ static int spi_nor_write(struct mtd_info *mtd, loff_t to, size_t len,
 			addr = spi_nor_s3an_addr_convert(nor, addr);
 
 		write_enable(nor);
+		program_opcode = nor->program_opcode;
+		if ((nor->info->flags & SPI_S3AN) &&
+				page_remain < nor->page_size)
+			nor->program_opcode = SPINOR_OP_RMW;
 		ret = nor->write(nor, addr, page_remain, buf + i);
+		nor->program_opcode = program_opcode;
 		if (ret < 0)
 			goto write_err;
 		written = ret;
